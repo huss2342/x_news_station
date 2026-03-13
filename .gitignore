@@ -1,0 +1,51 @@
+# Python bytecode and tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Local editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Environment files and other local secrets
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.secrets
+
+# X-News-Station local config that may contain API keys
+x_news_station/station_settings.ini
+x_news_station/*.local.ini
+x_news_station/accounts.db
+x_news_station/twitter_accounts.txt
+
+# Generated runtime data
+x_news_station/logs/
+x_news_station/cache/*
+!x_news_station/cache/.gitkeep
+
+# User-supplied media and local model assets
+x_news_station/assets/music/*.mp3
+x_news_station/assets/music/*.wav
+!x_news_station/assets/music/.gitkeep
+x_news_station/kokoro-v1.0.onnx
+x_news_station/voices-v1.0.bin
