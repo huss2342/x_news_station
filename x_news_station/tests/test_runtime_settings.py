@@ -171,3 +171,54 @@ def test_save_runtime_settings_round_trips_core_fields(tmp_path: Path) -> None:
     assert loaded.llm_api_model == "qwen2.5-7b-instruct"
     assert loaded.music_volume_idle == 0.65
     assert loaded.music_volume_ducked == 0.15
+
+
+def test_load_and_save_runtime_settings_round_trip_editorial_source_and_ui_fields(tmp_path: Path) -> None:
+    settings_path = tmp_path / "station_settings.ini"
+    settings_path.write_text(
+        "\n".join(
+            [
+                "[sources]",
+                "include_original_posts = true",
+                "include_quote_posts = false",
+                "include_replies = true",
+                "include_reposts = true",
+                "",
+                "[editorial]",
+                "segment_interval_seconds = 75",
+                "candidate_lookback_minutes = 120",
+                "repeat_cooldown_minutes = 20",
+                "max_consecutive_same_source = 3",
+                "default_rundown_strategy = discussion_heavy",
+                "segment_types = quick_reset, why_it_matters, music_break",
+                "",
+                "[ui]",
+                "theme = obsidian_console",
+                "advanced_mode = true",
+                "show_console = false",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    settings, _ = load_runtime_settings(settings_path)
+
+    assert settings.include_original_posts is True
+    assert settings.include_quote_posts is False
+    assert settings.include_replies is True
+    assert settings.include_reposts is True
+    assert settings.editorial_segment_interval_seconds == 75
+    assert settings.editorial_candidate_lookback_minutes == 120
+    assert settings.editorial_repeat_cooldown_minutes == 20
+    assert settings.editorial_max_consecutive_same_source == 3
+    assert settings.editorial_default_rundown_strategy == "discussion_heavy"
+    assert settings.editorial_segment_types == ["quick_reset", "why_it_matters", "music_break"]
+    assert settings.ui_theme == "obsidian_console"
+    assert settings.ui_advanced_mode is True
+    assert settings.ui_show_console is False
+
+    save_runtime_settings(settings_path, settings)
+    reloaded, _ = load_runtime_settings(settings_path, include_env_secrets=False)
+    assert reloaded.editorial_segment_types == ["quick_reset", "why_it_matters", "music_break"]
+    assert reloaded.ui_theme == "obsidian_console"
+    assert reloaded.include_replies is True

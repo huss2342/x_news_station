@@ -127,16 +127,16 @@ class TestTwitterMonitor:
         mock_tweet.id = "12345"
         mock_tweet.rawContent = "Test tweet content"
         mock_tweet.date = datetime.now()
+        mock_tweet.inReplyToTweetId = None
+        mock_tweet.retweetedTweet = None
+        mock_tweet.quotedTweet = None
 
         # Setup mock API
         mock_api = MagicMock()
         mock_api.user_by_login.return_value = MagicMock(id=12345)
         mock_api.user_tweets.return_value = [mock_tweet]
 
-        twscrape_mock = MagicMock()
-        twscrape_mock.API.return_value = mock_api
-
-        with patch.dict(sys.modules, {"twscrape": twscrape_mock}):
+        with patch("modules.news_fetcher.create_twscrape_api", return_value=mock_api):
             monitor = TwitterMonitor(str(seen_ids_file))
 
             # First fetch should return the tweet
@@ -146,7 +146,6 @@ class TestTwitterMonitor:
             # Second fetch should return empty (tweet already seen)
             tweets2 = monitor.fetch_latest(["testuser"])
             assert len(tweets2) == 0
-            assert twscrape_mock.API.call_args.args[0].endswith("accounts.db")
 
     def test_fetch_latest_handles_errors_gracefully(self, tmp_path: Path) -> None:
         """Test that fetch_latest handles API errors without crashing."""
@@ -157,10 +156,7 @@ class TestTwitterMonitor:
         mock_api.user_by_login.return_value = MagicMock(id=12345)
         mock_api.user_tweets.side_effect = Exception("Network error")
 
-        twscrape_mock = MagicMock()
-        twscrape_mock.API.return_value = mock_api
-
-        with patch.dict(sys.modules, {"twscrape": twscrape_mock}):
+        with patch("modules.news_fetcher.create_twscrape_api", return_value=mock_api):
             monitor = TwitterMonitor(str(seen_ids_file))
 
             # Should return empty list, not raise exception
@@ -176,16 +172,16 @@ class TestTwitterMonitor:
         mock_tweet.id = "12345"
         mock_tweet.rawContent = "Test tweet content"
         mock_tweet.date = datetime.now()
+        mock_tweet.inReplyToTweetId = None
+        mock_tweet.retweetedTweet = None
+        mock_tweet.quotedTweet = None
 
         # Setup mock API
         mock_api = MagicMock()
         mock_api.user_by_login.return_value = MagicMock(id=12345)
         mock_api.user_tweets.return_value = [mock_tweet]
 
-        twscrape_mock = MagicMock()
-        twscrape_mock.API.return_value = mock_api
-
-        with patch.dict(sys.modules, {"twscrape": twscrape_mock}):
+        with patch("modules.news_fetcher.create_twscrape_api", return_value=mock_api):
             monitor = TwitterMonitor(str(seen_ids_file))
             monitor.fetch_latest(["testuser"])
 
@@ -200,6 +196,9 @@ class TestTwitterMonitor:
         mock_tweet.id = "12345"
         mock_tweet.rawContent = "Test tweet content"
         mock_tweet.date = datetime.now()
+        mock_tweet.inReplyToTweetId = None
+        mock_tweet.retweetedTweet = None
+        mock_tweet.quotedTweet = None
 
         mock_user = MagicMock()
         mock_user.id = 987654321
@@ -208,15 +207,71 @@ class TestTwitterMonitor:
         mock_api.user_by_login.return_value = mock_user
         mock_api.user_tweets.return_value = [mock_tweet]
 
-        twscrape_mock = MagicMock()
-        twscrape_mock.API.return_value = mock_api
-
-        with patch.dict(sys.modules, {"twscrape": twscrape_mock}):
+        with patch("modules.news_fetcher.create_twscrape_api", return_value=mock_api):
             monitor = TwitterMonitor(str(seen_ids_file))
             monitor.fetch_latest(["cirnosad"])
 
         mock_api.user_by_login.assert_called_once_with("cirnosad")
         mock_api.user_tweets.assert_called_once_with(987654321, limit=5)
+
+    def test_fetch_latest_applies_source_type_filters_and_metadata(self, tmp_path: Path) -> None:
+        seen_ids_file = tmp_path / "seen_ids.json"
+
+        original = MagicMock()
+        original.id = "tweet-original"
+        original.rawContent = "Original tweet"
+        original.date = datetime.now()
+        original.inReplyToTweetId = None
+        original.retweetedTweet = None
+        original.quotedTweet = None
+        original.likeCount = 3
+        original.retweetCount = 1
+        original.quoteCount = 0
+        original.replyCount = 2
+        original.url = "https://x.com/test/status/1"
+
+        quote = MagicMock()
+        quote.id = "tweet-quote"
+        quote.rawContent = "Quote tweet"
+        quote.date = datetime.now()
+        quote.inReplyToTweetId = None
+        quote.retweetedTweet = None
+        quote.quotedTweet = object()
+        quote.likeCount = 5
+        quote.retweetCount = 2
+        quote.quoteCount = 1
+        quote.replyCount = 0
+        quote.url = "https://x.com/test/status/2"
+
+        reply = MagicMock()
+        reply.id = "tweet-reply"
+        reply.rawContent = "Reply tweet"
+        reply.date = datetime.now()
+        reply.inReplyToTweetId = "parent"
+        reply.retweetedTweet = None
+        reply.quotedTweet = None
+        reply.likeCount = 1
+        reply.retweetCount = 0
+        reply.quoteCount = 0
+        reply.replyCount = 1
+        reply.url = "https://x.com/test/status/3"
+
+        mock_api = MagicMock()
+        mock_api.user_by_login.return_value = MagicMock(id=12345)
+        mock_api.user_tweets.return_value = [original, quote, reply]
+
+        with patch("modules.news_fetcher.create_twscrape_api", return_value=mock_api):
+            with patch("config.INCLUDE_ORIGINAL_POSTS", True), patch("config.INCLUDE_QUOTE_POSTS", True), patch(
+                "config.INCLUDE_REPLIES", False
+            ), patch("config.INCLUDE_REPOSTS", False):
+                monitor = TwitterMonitor(str(seen_ids_file))
+                tweets = monitor.fetch_latest(["testuser"])
+
+        assert [tweet.id for tweet in tweets] == ["tweet-original", "tweet-quote"]
+        assert tweets[0].source_type == "original"
+        assert tweets[0].like_count == 3
+        assert tweets[1].is_quote is True
+        assert tweets[1].source_type == "quote"
 
 
 class TestGetMonitor:

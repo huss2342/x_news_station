@@ -217,9 +217,15 @@ def main() -> int:
             return 1 if smoke_test_failed(results) else 0
 
         if args.gui or not args.no_gui:
-            from launcher_gui import run_gui
+            try:
+                from desktop_app import run_desktop_app
 
-            return run_gui(settings_path)
+                return run_desktop_app(settings_path)
+            except Exception as exc:
+                print(f"Desktop app unavailable ({exc}). Falling back to legacy launcher.")
+                from launcher_gui import run_gui
+
+                return run_gui(settings_path)
 
         apply_runtime_settings(settings)
 

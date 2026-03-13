@@ -88,6 +88,16 @@ class Rewriter(Protocol):
         """Build a filler segment for quiet periods."""
         ...
 
+    def build_rundown_segment(
+        self,
+        segment_type: str,
+        primary_story: TweetData | None,
+        supporting_stories: list[TweetData] | None = None,
+        recent_stories: list[str] | None = None,
+    ) -> list[ScriptLine]:
+        """Build a planned editorial segment."""
+        ...
+
 
 def _deterministic_choice(options: list[str], seed: str) -> str:
     if not options:
@@ -145,6 +155,18 @@ def _headline_system_prompt() -> str:
     )
 
 
+def _editorial_system_prompt(segment_type: str) -> str:
+    return (
+        "You are writing a short factual segment for a local-first live radio news station. "
+        "Use only the supplied social-post details and direct comparisons that can be inferred from them. "
+        "Do not invent facts, timelines, reactions, or outside context. "
+        "Return strict JSON with this shape: {\"lines\": [{\"speaker\": \"anchor\", \"text\": \"...\"}, "
+        "{\"speaker\": \"analyst\", \"text\": \"...\"}]}. Use only speakers 'anchor' or 'analyst'. "
+        "No markdown, no code fences, no bullet points, no URLs. Keep it broadcast-ready and concise. "
+        f"Segment type: {segment_type}. {_headline_style_prompt()}"
+    )
+
+
 def _filler_system_prompt() -> str:
     return (
         "You are writing a short filler segment for a live radio station between headline checks. "
@@ -164,6 +186,57 @@ def _extract_json_payload(content: str) -> dict[str, Any]:
     return json.loads(stripped[start : end + 1])
 
 
+def _story_brief(tweet: TweetData) -> str:
+    source_bits: list[str] = []
+    if tweet.is_quote:
+        source_bits.append("quote post")
+    elif tweet.is_repost:
+        source_bits.append("repost")
+    elif tweet.is_reply:
+        source_bits.append("reply")
+    else:
+        source_bits.append("original post")
+
+    source_bits.append(f"likes={tweet.like_count}")
+    source_bits.append(f"reposts={tweet.retweet_count}")
+    source_bits.append(f"quotes={tweet.quote_count}")
+    source_bits.append(f"replies={tweet.reply_count}")
+    if tweet.quoted_username:
+        source_bits.append(f"quotes=@{tweet.quoted_username}")
+    if tweet.article_title:
+        source_bits.append(f"article={tweet.article_title}")
+    metadata = ", ".join(source_bits)
+    extras: list[str] = []
+    if tweet.quoted_text:
+        extras.append(f"quoted post: {normalize_script_text(tweet.quoted_text)}")
+    if tweet.article_title or tweet.article_description:
+        article_bits = [bit for bit in [tweet.article_title, tweet.article_description] if bit]
+        extras.append(f"linked article: {normalize_script_text(' '.join(article_bits))}")
+    if tweet.link_urls():
+        extras.append(f"links: {', '.join(tweet.link_urls()[:3])}")
+    extra_text = f" | {' | '.join(extras)}" if extras else ""
+    return f"@{tweet.username} ({metadata}): {normalize_script_text(tweet.text)}{extra_text}"
+
+
+def _tweet_prompt_context(tweet: TweetData) -> str:
+    lines = [
+        f"Account: @{tweet.username}",
+        f"Post type: {tweet.source_type}",
+        f"Raw post: {tweet.text}",
+    ]
+    if tweet.quoted_text:
+        quoted_source = f"@{tweet.quoted_username}" if tweet.quoted_username else "quoted account"
+        lines.append(f"Quoted post from {quoted_source}: {tweet.quoted_text}")
+    if tweet.article_title or tweet.article_description:
+        article_summary = " | ".join(bit for bit in [tweet.article_title, tweet.article_description] if bit)
+        lines.append(f"Attached article/card: {article_summary}")
+    if tweet.article_url:
+        lines.append(f"Attached article URL: {tweet.article_url}")
+    elif tweet.link_urls():
+        lines.append(f"Expanded links: {', '.join(tweet.link_urls()[:3])}")
+    return "\n".join(lines)
+
+
 class SimpleRewriter:
     """Regex-based fallback rewriter used when external providers are unavailable."""
 
@@ -174,6 +247,17 @@ class SimpleRewriter:
     def rewrite(self, tweet: TweetData) -> str:
         """Generate a varied, deterministic headline rewrite."""
         text = normalize_script_text(tweet.text)
+        context_bits: list[str] = []
+        if tweet.quoted_text:
+            quoted_name = f"@{tweet.quoted_username}" if tweet.quoted_username else "another account"
+            context_bits.append(f"The post also quotes {quoted_name} saying {normalize_script_text(tweet.quoted_text)}")
+        elif tweet.article_title:
+            context_bits.append(f"The linked article points to {normalize_script_text(tweet.article_title)}")
+        elif tweet.article_url:
+            context_bits.append("The post links out to an attached article")
+
+        if context_bits:
+            text = f"{text}. {' '.join(context_bits)}".strip()
         if not text:
             text = "shared a brief update with little additional context"
         opener = _deterministic_choice(HEADLINE_OPENERS, f"{tweet.id}:headline:opener")
@@ -257,6 +341,103 @@ class SimpleRewriter:
             ),
         ]
 
+    def build_rundown_segment(
+        self,
+        segment_type: str,
+        primary_story: TweetData | None,
+        supporting_stories: list[TweetData] | None = None,
+        recent_stories: list[str] | None = None,
+    ) -> list[ScriptLine]:
+        """Build fallback editorial segments for the rundown planner."""
+        supporting_stories = supporting_stories or []
+
+        if segment_type == "music_break":
+            return []
+
+        if primary_story is None and supporting_stories:
+            primary_story = supporting_stories[0]
+        if primary_story is None:
+            return self.build_filler_segment(
+                "the next shift in the tech world",
+                recent_stories=recent_stories,
+                idle_format="two_host",
+            )
+
+        primary_headline = self.rewrite(primary_story)
+
+        if segment_type == "fresh_headline":
+            return [ScriptLine("anchor", primary_headline)]
+
+        if segment_type == "quick_reset":
+            stories = [primary_story, *supporting_stories][:3]
+            lines = [
+                ScriptLine(
+                    "anchor",
+                    "Let us reset the board with the items still carrying the most weight right now.",
+                )
+            ]
+            for story in stories:
+                lines.append(ScriptLine("anchor", self.rewrite(story)))
+            lines.append(
+                ScriptLine(
+                    "analyst",
+                    "That gives us the current shape of the feed while we wait for the next clear move.",
+                )
+            )
+            return lines
+
+        if segment_type == "compare_updates":
+            secondary = supporting_stories[0] if supporting_stories else primary_story
+            secondary_headline = self.rewrite(secondary)
+            return [
+                ScriptLine("anchor", primary_headline),
+                ScriptLine(
+                    "analyst",
+                    _ensure_sentence_punctuation(
+                        f"Set against that, another line on the board is {normalize_script_text(secondary_headline)}"
+                    ),
+                ),
+                ScriptLine(
+                    "anchor",
+                    "Together they show where the pressure and momentum are building across the feed.",
+                ),
+            ]
+
+        if segment_type == "why_it_matters":
+            return [
+                ScriptLine("anchor", primary_headline),
+                ScriptLine(
+                    "analyst",
+                    _ensure_sentence_punctuation(
+                        f"It matters because @{primary_story.username} is framing the story as {primary_story.source_type}, "
+                        "and the engagement around it suggests the topic is still carrying attention"
+                    ),
+                ),
+                ScriptLine(
+                    "anchor",
+                    "That is the angle we will keep on watch as the board updates.",
+                ),
+            ]
+
+        return [
+            ScriptLine(
+                "anchor",
+                _ensure_sentence_punctuation(
+                    f"One thread still worth tracking on our watchlist is {normalize_script_text(primary_story.text)}"
+                ),
+            ),
+            ScriptLine(
+                "analyst",
+                _ensure_sentence_punctuation(
+                    "The value there is not just the post itself, but how it reframes the broader conversation we are following."
+                ),
+            ),
+            ScriptLine(
+                "anchor",
+                _ensure_sentence_punctuation(self._recent_reference(recent_stories)),
+            ),
+        ]
+
 
 class NewsRewriter:
     """Primary LLM-powered rewriter with retry and fallback handling."""
@@ -269,6 +450,7 @@ class NewsRewriter:
         )
         self._cache: dict[str, str] = {}
         self._filler_cache: dict[str, list[ScriptLine]] = {}
+        self._segment_cache: dict[str, list[ScriptLine]] = {}
         self._fallback: SimpleRewriter | None = None
         self._ollama_client: Any | None = None
         self._llm_provider = config.LLM_PROVIDER.strip().lower()
@@ -489,8 +671,8 @@ class NewsRewriter:
             return self._rewrite_with_fallback(tweet)
 
         prompt = (
-            f"Rewrite this post from @{tweet.username} into a radio headline.\n\n"
-            f"Raw post:\n{tweet.text}"
+            "Rewrite this social post into a radio headline using only the supplied context.\n\n"
+            f"{_tweet_prompt_context(tweet)}"
         )
         try:
             rewritten = self._call_llm(_headline_system_prompt(), prompt)
@@ -569,11 +751,85 @@ class NewsRewriter:
         self._filler_cache[cache_key] = lines
         return lines
 
+    def build_rundown_segment(
+        self,
+        segment_type: str,
+        primary_story: TweetData | None,
+        supporting_stories: list[TweetData] | None = None,
+        recent_stories: list[str] | None = None,
+    ) -> list[ScriptLine]:
+        """Build a short editorial segment for the rundown planner."""
+        supporting_stories = supporting_stories or []
+        if segment_type == "music_break":
+            return []
+
+        cache_seed = json.dumps(
+            {
+                "segment_type": segment_type,
+                "primary_story": primary_story.id if primary_story else "",
+                "supporting_stories": [story.id for story in supporting_stories],
+                "recent_stories": recent_stories or [],
+                "style": config.SHOW_STYLE,
+            },
+            sort_keys=True,
+        )
+        cache_key = hashlib.sha256(cache_seed.encode("utf-8")).hexdigest()
+        cached = self._segment_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        if not self._use_llm:
+            lines = self._get_fallback().build_rundown_segment(
+                segment_type,
+                primary_story,
+                supporting_stories,
+                recent_stories,
+            )
+            self._segment_cache[cache_key] = lines
+            return lines
+
+        story_lines = []
+        if primary_story is not None:
+            story_lines.append(f"Primary story: {_story_brief(primary_story)}")
+        if supporting_stories:
+            story_lines.extend(
+                f"Supporting story {index}: {_story_brief(story)}"
+                for index, story in enumerate(supporting_stories, start=1)
+            )
+        if recent_stories:
+            story_lines.append("Recent items already aired:")
+            story_lines.extend(f"- {normalize_script_text(item)}" for item in recent_stories[:3])
+
+        prompt = "\n".join(
+            [
+                f"Segment type: {segment_type}",
+                *story_lines,
+                "",
+                "Write the on-air script now.",
+            ]
+        )
+
+        try:
+            content = self._call_llm(_editorial_system_prompt(segment_type), prompt)
+            lines = self._parse_filler_lines(content)
+        except Exception as exc:
+            logger.warning("Editorial segment generation failed, using fallback copy: %s", exc)
+            lines = self._get_fallback().build_rundown_segment(
+                segment_type,
+                primary_story,
+                supporting_stories,
+                recent_stories,
+            )
+
+        self._segment_cache[cache_key] = lines
+        return lines
+
     def get_cache_stats(self) -> dict[str, int]:
         """Return cache metadata."""
         return {
             "cached_items": len(self._cache),
             "cached_filler_segments": len(self._filler_cache),
+            "cached_rundown_segments": len(self._segment_cache),
         }
 
 

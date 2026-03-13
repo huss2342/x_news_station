@@ -12,6 +12,7 @@ from typing import Any, TypedDict
 
 import config
 from modules.audio_studio import VoiceGenerator
+from modules.editorial_planner import EditorialRundownPlanner, RundownItem
 from modules.json_storage import read_json_file, write_json_file
 from modules.news_anchor import RECAP_INTROS, RECAP_OUTROS, NewsRewriter, ScriptLine, SimpleRewriter
 from modules.news_fetcher import BaseTweetMonitor, TweetData, get_monitor
@@ -70,11 +71,14 @@ class RadioStation:
         self.recap_interval = timedelta(seconds=config.RECAP_INTERVAL_SECONDS)
         self.filler_interval = timedelta(seconds=config.FILLER_INTERVAL_SECONDS)
         self.filler_enabled = config.FILLER_ENABLED
+        self.segment_interval = timedelta(seconds=config.EDITORIAL_SEGMENT_INTERVAL_SECONDS)
         self._filler_index = 0
         self._recap_intro_index = 0
         self._recap_outro_index = 0
+        self.planner = EditorialRundownPlanner()
 
         self.story_log_file = config.get_story_log_file()
+        self.rundown_state_file = config.get_rundown_state_file()
         self.story_log: list[StoryRecord] = []
         self._story_log_lock = threading.Lock()
         self._load_story_log()
@@ -204,12 +208,14 @@ class RadioStation:
             self.story_log = loaded
             self._prune_story_log()
         logger.debug("Loaded %s stories from %s", len(self.story_log), self.story_log_file)
+        self._save_rundown_state()
 
     def _save_story_log(self) -> None:
         """Persist story history using locked atomic write."""
         with self._story_log_lock:
             payload = list(self.story_log)
         write_json_file(self.story_log_file, payload, logger)
+        self._save_rundown_state()
 
     def _prune_story_log(self) -> None:
         """Drop stories older than configured retention window."""
@@ -237,6 +243,42 @@ class RadioStation:
             self._prune_story_log()
         self._save_story_log()
         logger.debug("Logged story for @%s", tweet.username)
+
+    def _render_story_summary(self, story_id: str) -> dict[str, str]:
+        story = self.planner.get_story(story_id)
+        if story is None:
+            return {"id": story_id, "username": "", "source_type": "", "text": ""}
+        return {
+            "id": story.id,
+            "username": story.username,
+            "source_type": story.source_type,
+            "text": " ".join(story.text.split())[:220],
+        }
+
+    def _save_rundown_state(self, current_item: RundownItem | None = None) -> None:
+        """Persist lightweight runtime state for the desktop dashboard."""
+        preview = self.planner.preview(limit=5)
+        payload = {
+            "state": self.state.name,
+            "current_item": {
+                "segment_type": current_item.segment_type,
+                "stories": [self._render_story_summary(story_id) for story_id in current_item.story_ids],
+                "reason": current_item.reason,
+            }
+            if current_item is not None
+            else None,
+            "preview": [
+                {
+                    "segment_type": item.segment_type,
+                    "stories": [self._render_story_summary(story_id) for story_id in item.story_ids],
+                    "reason": item.reason,
+                }
+                for item in preview
+            ],
+            "candidate_count": len(self.planner.story_ids()),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        write_json_file(self.rundown_state_file, payload, logger)
 
     def _start_fade_worker(self) -> None:
         """Start single background worker that handles all fade requests."""
@@ -415,12 +457,18 @@ class RadioStation:
             if abs(self._current_volume - config.MUSIC_VOLUME_IDLE) > 0.001:
                 self._fade_volume(config.MUSIC_VOLUME_IDLE)
 
-        if self.last_check_time is None:
-            sleep_seconds = config.INITIAL_IDLE_SLEEP_SECONDS
-        else:
+        fetch_wait = config.INITIAL_IDLE_SLEEP_SECONDS
+        if self.last_check_time is not None:
             elapsed = datetime.now() - self.last_check_time
-            remaining = (self.check_interval - elapsed).total_seconds()
-            sleep_seconds = max(config.INITIAL_IDLE_SLEEP_SECONDS, remaining)
+            remaining = max(0.0, (self.check_interval - elapsed).total_seconds())
+            fetch_wait = min(fetch_wait, remaining) if remaining > 0 else 0.0
+
+        segment_wait = self.planner.time_until_next_segment_seconds()
+        if self.planner.story_ids():
+            positive_waits = [value for value in (fetch_wait, segment_wait, config.INITIAL_IDLE_SLEEP_SECONDS) if value > 0]
+            sleep_seconds = min(positive_waits) if positive_waits else config.INITIAL_IDLE_SLEEP_SECONDS
+        else:
+            sleep_seconds = fetch_wait if fetch_wait > 0 else config.INITIAL_IDLE_SLEEP_SECONDS
 
         logger.debug("Idle sleeping for %.2fs", sleep_seconds)
         time.sleep(sleep_seconds)
@@ -469,6 +517,69 @@ class RadioStation:
                     continue
 
                 self._play_audio_file(audio_path)
+        finally:
+            if self.use_music:
+                self._fade_volume(config.MUSIC_VOLUME_IDLE)
+
+    def _ingest_editorial_candidates(self, tweets: list[TweetData]) -> None:
+        """Add freshly fetched tweets into the rolling editorial candidate pool."""
+        if not tweets:
+            return
+        self.planner.ingest_tweets(tweets)
+        self._save_rundown_state()
+
+    def _build_rundown_script(self, item: RundownItem) -> list[ScriptLine]:
+        """Build script lines for a planned rundown item."""
+        primary_story = self.planner.get_story(item.primary_story_id) if item.primary_story_id else None
+        supporting_stories = [
+            story
+            for story in (self.planner.get_story(story_id) for story_id in item.supporting_story_ids)
+            if story is not None
+        ]
+
+        if item.segment_type == "fresh_headline" and primary_story is not None:
+            rewritten = self.rewriter.rewrite(primary_story)
+            self._log_story(primary_story, rewritten)
+            return [ScriptLine("anchor", rewritten)]
+
+        lines = self.rewriter.build_rundown_segment(
+            item.segment_type,
+            primary_story,
+            supporting_stories,
+            self._recent_story_context(limit=3),
+        )
+
+        if primary_story is not None and item.segment_type in {"quick_reset", "compare_updates", "why_it_matters"}:
+            try:
+                rewritten = self.rewriter.rewrite(primary_story)
+                self._log_story(primary_story, rewritten)
+            except Exception as exc:
+                logger.debug("Could not log primary story for %s: %s", item.segment_type, exc)
+        return lines
+
+    def _play_rundown_item(self, item: RundownItem) -> None:
+        """Render and play a single planned segment."""
+        if item.segment_type == "music_break":
+            logger.info("Planner scheduled music break")
+            self.planner.mark_aired(item)
+            self._save_rundown_state(item)
+            return
+
+        self.state = RadioState.BROADCASTING
+        logger.info("Planner selected segment=%s stories=%s", item.segment_type, ", ".join(item.story_ids))
+
+        if self.use_music:
+            self._fade_volume(config.MUSIC_VOLUME_DUCKED)
+            time.sleep(config.MUSIC_FADE_DURATION_SECONDS)
+
+        try:
+            script_lines = self._build_rundown_script(item)
+            self._save_rundown_state(item)
+            self._play_script_lines(script_lines)
+            self.planner.mark_aired(item)
+            self._save_rundown_state()
+        except Exception as exc:
+            logger.error("Rundown segment failed for %s: %s", item.segment_type, exc)
         finally:
             if self.use_music:
                 self._fade_volume(config.MUSIC_VOLUME_IDLE)
@@ -589,6 +700,12 @@ class RadioStation:
         """Return True when recap interval has elapsed."""
         return datetime.now() - self.last_recap_time >= self.recap_interval
 
+    def _fetch_due(self) -> bool:
+        """Return True when it is time to poll for fresh source material."""
+        if self.last_check_time is None:
+            return True
+        return datetime.now() - self.last_check_time >= self.check_interval
+
     def start(self) -> None:
         """Run station loop forever, logging and recovering from iteration failures."""
         logger.info("=" * 50)
@@ -598,14 +715,26 @@ class RadioStation:
         try:
             while True:
                 try:
-                    self._idle()
-                    new_tweets = self._check()
-                    if new_tweets:
-                        self._broadcast(new_tweets)
+                    did_work = False
+
+                    if self._fetch_due():
+                        new_tweets = self._check()
+                        self._ingest_editorial_candidates(new_tweets)
+                        did_work = True
+
+                    next_item = self.planner.next_item()
+                    if next_item is not None:
+                        self._play_rundown_item(next_item)
+                        did_work = True
                     elif self._should_recap():
                         self._recap()
-                    elif self._should_run_filler():
+                        did_work = True
+                    elif self._should_run_filler() and not self.planner.story_ids():
                         self._filler_segment()
+                        did_work = True
+
+                    if not did_work:
+                        self._idle()
                 except KeyboardInterrupt:
                     raise
                 except Exception as exc:
@@ -650,3 +779,4 @@ class RadioStation:
             logger.warning("Cache cleanup failed: %s", exc)
 
         logger.info("Shutdown complete")
+        self._save_rundown_state()

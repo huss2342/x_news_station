@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 from modules.news_anchor import ScriptLine
 from modules.news_fetcher import TweetData
 from modules.radio_loop import RadioState, RadioStation
+from modules.editorial_planner import RundownItem
 
 
 def _build_station(tmp_path: Path, **kwargs) -> RadioStation:
@@ -184,3 +185,31 @@ def test_broadcast_logs_aware_timestamp_without_story_prune_error(tmp_path: Path
 
     assert len(station.story_log) == 1
     assert station.story_log[0]["timestamp"].endswith("+00:00")
+
+
+def test_rundown_segment_uses_role_specific_voices(tmp_path: Path) -> None:
+    audio_path = tmp_path / "rundown.wav"
+    audio_path.write_bytes(b"fake-audio")
+    mock_voice = MagicMock()
+    mock_voice.generate.return_value = audio_path
+    mock_rewriter = MagicMock()
+    mock_rewriter.build_rundown_segment.return_value = [
+        ScriptLine("anchor", "Quick reset from the desk."),
+        ScriptLine("analyst", "The second angle matters because the feed is thin today."),
+    ]
+
+    station = _build_station(
+        tmp_path,
+        rewriter=mock_rewriter,
+        voice_generator=mock_voice,
+        anchor_voice_id="am_michael",
+        analyst_voice_id="bf_emma",
+    )
+    tweet = TweetData(id="story-1", username="solo", text="One user update", timestamp=datetime.now(timezone.utc))
+    station.planner.ingest_tweets([tweet])
+    station._play_audio_file = MagicMock()
+
+    station._play_rundown_item(RundownItem(segment_type="why_it_matters", primary_story_id="story-1"))
+
+    assert mock_voice.generate.call_args_list[0].args[1] == "am_michael"
+    assert mock_voice.generate.call_args_list[1].args[1] == "bf_emma"

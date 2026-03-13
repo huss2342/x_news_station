@@ -14,6 +14,10 @@ USE_MOCK_TWITTER: bool = True
 MOCK_TWEET_BATCH_SIZE: int = 5
 SEEN_IDS_FILE: str = "cache/seen_ids.json"
 TWITTER_ACCOUNTS_DB_FILE: str = "accounts.db"
+INCLUDE_ORIGINAL_POSTS: bool = True
+INCLUDE_QUOTE_POSTS: bool = True
+INCLUDE_REPLIES: bool = False
+INCLUDE_REPOSTS: bool = False
 
 # Recap and story retention settings
 RECAP_INTERVAL_SECONDS: int = 1800
@@ -21,6 +25,7 @@ RECAP_STORY_COUNT: int = 3
 RECAP_LOOKBACK_HOURS: int = 1
 STORY_RETENTION_HOURS: int = 24
 STORY_LOG_FILE: str = "cache/story_log.json"
+RUNDOWN_STATE_FILE: str = "cache/rundown_state.json"
 
 # Filler segment settings for dead-air moments
 FILLER_ENABLED: bool = True
@@ -32,6 +37,29 @@ FILLER_TOPICS: list[str] = [
     "daily developer productivity habits",
     "simple cybersecurity hygiene reminders",
 ]
+
+# Editorial rundown settings
+EDITORIAL_SEGMENT_INTERVAL_SECONDS: int = 90
+EDITORIAL_CANDIDATE_LOOKBACK_MINUTES: int = 60
+EDITORIAL_REPEAT_COOLDOWN_MINUTES: int = 15
+EDITORIAL_MAX_CONSECUTIVE_SAME_SOURCE: int = 2
+EDITORIAL_DEFAULT_RUNDOWN_STRATEGY: str = "editorial"
+EDITORIAL_SEGMENT_TYPES: list[str] = [
+    "fresh_headline",
+    "quick_reset",
+    "compare_updates",
+    "why_it_matters",
+    "watchlist_discussion",
+    "music_break",
+]
+EDITORIAL_SEGMENT_TYPE_LABELS: dict[str, str] = {
+    "fresh_headline": "Fresh Headline",
+    "quick_reset": "Quick Reset",
+    "compare_updates": "Compare Updates",
+    "why_it_matters": "Why It Matters",
+    "watchlist_discussion": "Watchlist Discussion",
+    "music_break": "Music Break",
+}
 
 # Ollama settings
 OLLAMA_MODEL: str = "llama3"
@@ -136,6 +164,11 @@ JSON_LOCK_RETRY_SECONDS: float = 0.05
 LOG_LEVEL: str = "INFO"
 LOG_FILE: str = "logs/app.log"
 
+# UI settings
+UI_THEME: str = "broadcast_warm"
+UI_ADVANCED_MODE: bool = False
+UI_SHOW_CONSOLE: bool = True
+
 # Runtime settings files
 SETTINGS_FILE: str = "station_settings.ini"
 SETTINGS_EXAMPLE_FILE: str = "station_settings.example.ini"
@@ -174,6 +207,11 @@ def get_twitter_accounts_db_file() -> Path:
 def get_story_log_file() -> Path:
     """Return the resolved path to the story log file."""
     return get_project_root() / STORY_LOG_FILE
+
+
+def get_rundown_state_file() -> Path:
+    """Return the resolved path to the rundown state file."""
+    return get_project_root() / RUNDOWN_STATE_FILE
 
 
 def get_settings_file() -> Path:

@@ -13,6 +13,7 @@ VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 VALID_LLM_PROVIDERS = {"ollama", "openai_compatible", "simple"}
 VALID_SHOW_STYLES = {"hybrid", "talk_radio", "straight_news"}
 VALID_IDLE_FORMATS = {"two_host", "solo_host", "music_first"}
+VALID_UI_THEMES = {"broadcast_warm", "obsidian_console", "day_shift"}
 TRUE_VALUES = {"1", "true", "yes", "on"}
 FALSE_VALUES = {"0", "false", "no", "off"}
 
@@ -40,6 +41,12 @@ fetch_interval_seconds = 300
 fetch_limit = 5
 mock_tweet_batch_size = 5
 
+[sources]
+include_original_posts = true
+include_quote_posts = true
+include_replies = false
+include_reposts = false
+
 [recap]
 interval_seconds = 1800
 story_count = 3
@@ -50,6 +57,14 @@ story_retention_hours = 24
 enabled = true
 interval_seconds = 900
 topics = AI industry rivalry, open-source launches, startup power shifts, chip manufacturing, creator economy changes
+
+[editorial]
+segment_interval_seconds = 90
+candidate_lookback_minutes = 60
+repeat_cooldown_minutes = 15
+max_consecutive_same_source = 2
+default_rundown_strategy = editorial
+segment_types = fresh_headline, quick_reset, compare_updates, why_it_matters, watchlist_discussion, music_break
 
 [llm]
 # provider: ollama | openai_compatible | simple
@@ -89,6 +104,11 @@ json_lock_retry_seconds = 0.05
 
 [logging]
 file = logs/app.log
+
+[ui]
+theme = broadcast_warm
+advanced_mode = false
+show_console = true
 """
 
 
@@ -109,6 +129,10 @@ class RuntimeSettings:
     fetch_interval_seconds: int
     twitter_fetch_limit: int
     mock_tweet_batch_size: int
+    include_original_posts: bool
+    include_quote_posts: bool
+    include_replies: bool
+    include_reposts: bool
 
     recap_interval_seconds: int
     recap_story_count: int
@@ -118,6 +142,12 @@ class RuntimeSettings:
     filler_enabled: bool
     filler_interval_seconds: int
     filler_topics: list[str]
+    editorial_segment_interval_seconds: int
+    editorial_candidate_lookback_minutes: int
+    editorial_repeat_cooldown_minutes: int
+    editorial_max_consecutive_same_source: int
+    editorial_default_rundown_strategy: str
+    editorial_segment_types: list[str]
 
     llm_provider: str
     ollama_model: str
@@ -148,6 +178,9 @@ class RuntimeSettings:
     json_lock_timeout_seconds: float
     json_lock_retry_seconds: float
     log_file: str
+    ui_theme: str
+    ui_advanced_mode: bool
+    ui_show_console: bool
 
     @classmethod
     def from_current_config(cls) -> RuntimeSettings:
@@ -165,6 +198,10 @@ class RuntimeSettings:
             fetch_interval_seconds=config.FETCH_INTERVAL_SECONDS,
             twitter_fetch_limit=config.TWITTER_FETCH_LIMIT,
             mock_tweet_batch_size=config.MOCK_TWEET_BATCH_SIZE,
+            include_original_posts=config.INCLUDE_ORIGINAL_POSTS,
+            include_quote_posts=config.INCLUDE_QUOTE_POSTS,
+            include_replies=config.INCLUDE_REPLIES,
+            include_reposts=config.INCLUDE_REPOSTS,
             recap_interval_seconds=config.RECAP_INTERVAL_SECONDS,
             recap_story_count=config.RECAP_STORY_COUNT,
             recap_lookback_hours=config.RECAP_LOOKBACK_HOURS,
@@ -172,6 +209,12 @@ class RuntimeSettings:
             filler_enabled=config.FILLER_ENABLED,
             filler_interval_seconds=config.FILLER_INTERVAL_SECONDS,
             filler_topics=list(config.FILLER_TOPICS),
+            editorial_segment_interval_seconds=config.EDITORIAL_SEGMENT_INTERVAL_SECONDS,
+            editorial_candidate_lookback_minutes=config.EDITORIAL_CANDIDATE_LOOKBACK_MINUTES,
+            editorial_repeat_cooldown_minutes=config.EDITORIAL_REPEAT_COOLDOWN_MINUTES,
+            editorial_max_consecutive_same_source=config.EDITORIAL_MAX_CONSECUTIVE_SAME_SOURCE,
+            editorial_default_rundown_strategy=config.EDITORIAL_DEFAULT_RUNDOWN_STRATEGY,
+            editorial_segment_types=list(config.EDITORIAL_SEGMENT_TYPES),
             llm_provider=config.LLM_PROVIDER,
             ollama_model=config.OLLAMA_MODEL,
             ollama_fallback_model=config.OLLAMA_FALLBACK_MODEL,
@@ -198,6 +241,9 @@ class RuntimeSettings:
             json_lock_timeout_seconds=config.JSON_LOCK_TIMEOUT_SECONDS,
             json_lock_retry_seconds=config.JSON_LOCK_RETRY_SECONDS,
             log_file=config.LOG_FILE,
+            ui_theme=config.UI_THEME,
+            ui_advanced_mode=config.UI_ADVANCED_MODE,
+            ui_show_console=config.UI_SHOW_CONSOLE,
         )
 
 
@@ -254,6 +300,10 @@ def _parse_accounts(value: str) -> list[str]:
 
 
 def _parse_topics(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _parse_segment_types(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
@@ -420,6 +470,14 @@ def _apply_ini_overrides(
         settings.twitter_fetch_limit = parsed
     if (parsed := _read_int(parser, "twitter", "mock_tweet_batch_size", notes)) is not None:
         settings.mock_tweet_batch_size = parsed
+    if (parsed := _read_bool(parser, "sources", "include_original_posts", notes)) is not None:
+        settings.include_original_posts = parsed
+    if (parsed := _read_bool(parser, "sources", "include_quote_posts", notes)) is not None:
+        settings.include_quote_posts = parsed
+    if (parsed := _read_bool(parser, "sources", "include_replies", notes)) is not None:
+        settings.include_replies = parsed
+    if (parsed := _read_bool(parser, "sources", "include_reposts", notes)) is not None:
+        settings.include_reposts = parsed
 
     if (parsed := _read_int(parser, "recap", "interval_seconds", notes)) is not None:
         settings.recap_interval_seconds = parsed
@@ -440,6 +498,22 @@ def _apply_ini_overrides(
             settings.filler_topics = topics
         else:
             notes.append("Invalid filler.topics; expected comma-separated topic names.")
+    if (parsed := _read_int(parser, "editorial", "segment_interval_seconds", notes)) is not None:
+        settings.editorial_segment_interval_seconds = parsed
+    if (parsed := _read_int(parser, "editorial", "candidate_lookback_minutes", notes)) is not None:
+        settings.editorial_candidate_lookback_minutes = parsed
+    if (parsed := _read_int(parser, "editorial", "repeat_cooldown_minutes", notes)) is not None:
+        settings.editorial_repeat_cooldown_minutes = parsed
+    if (parsed := _read_int(parser, "editorial", "max_consecutive_same_source", notes)) is not None:
+        settings.editorial_max_consecutive_same_source = parsed
+    if (value := _read_text(parser, "editorial", "default_rundown_strategy")) is not None:
+        settings.editorial_default_rundown_strategy = value
+    if parser.has_option("editorial", "segment_types"):
+        segment_types = _parse_segment_types(parser.get("editorial", "segment_types"))
+        if segment_types:
+            settings.editorial_segment_types = segment_types
+        else:
+            notes.append("Invalid editorial.segment_types; expected comma-separated segment type names.")
 
     if (value := _read_text(parser, "llm", "provider")) is not None:
         provider = value.lower()
@@ -504,6 +578,17 @@ def _apply_ini_overrides(
 
     if (value := _read_text(parser, "logging", "file")) is not None:
         settings.log_file = value
+    if (value := _read_text(parser, "ui", "theme")) is not None:
+        if value in VALID_UI_THEMES:
+            settings.ui_theme = value
+        else:
+            notes.append(
+                f"Invalid ui.theme '{value}'. Expected one of: {', '.join(sorted(VALID_UI_THEMES))}."
+            )
+    if (parsed := _read_bool(parser, "ui", "advanced_mode", notes)) is not None:
+        settings.ui_advanced_mode = parsed
+    if (parsed := _read_bool(parser, "ui", "show_console", notes)) is not None:
+        settings.ui_show_console = parsed
 
     _normalize_show_settings(settings, parser, notes)
 
@@ -553,6 +638,12 @@ def render_runtime_settings(settings: RuntimeSettings) -> str:
         f"fetch_limit = {normalized.twitter_fetch_limit}",
         f"mock_tweet_batch_size = {normalized.mock_tweet_batch_size}",
         "",
+        "[sources]",
+        f"include_original_posts = {_format_bool(normalized.include_original_posts)}",
+        f"include_quote_posts = {_format_bool(normalized.include_quote_posts)}",
+        f"include_replies = {_format_bool(normalized.include_replies)}",
+        f"include_reposts = {_format_bool(normalized.include_reposts)}",
+        "",
         "[recap]",
         f"interval_seconds = {normalized.recap_interval_seconds}",
         f"story_count = {normalized.recap_story_count}",
@@ -563,6 +654,14 @@ def render_runtime_settings(settings: RuntimeSettings) -> str:
         f"enabled = {_format_bool(normalized.filler_enabled)}",
         f"interval_seconds = {normalized.filler_interval_seconds}",
         f"topics = {', '.join(normalized.filler_topics)}",
+        "",
+        "[editorial]",
+        f"segment_interval_seconds = {normalized.editorial_segment_interval_seconds}",
+        f"candidate_lookback_minutes = {normalized.editorial_candidate_lookback_minutes}",
+        f"repeat_cooldown_minutes = {normalized.editorial_repeat_cooldown_minutes}",
+        f"max_consecutive_same_source = {normalized.editorial_max_consecutive_same_source}",
+        f"default_rundown_strategy = {normalized.editorial_default_rundown_strategy}",
+        f"segment_types = {', '.join(normalized.editorial_segment_types)}",
         "",
         "[llm]",
         "# provider: ollama | openai_compatible | simple",
@@ -602,6 +701,11 @@ def render_runtime_settings(settings: RuntimeSettings) -> str:
         "",
         "[logging]",
         f"file = {normalized.log_file}",
+        "",
+        "[ui]",
+        f"theme = {normalized.ui_theme}",
+        f"advanced_mode = {_format_bool(normalized.ui_advanced_mode)}",
+        f"show_console = {_format_bool(normalized.ui_show_console)}",
         "",
     ]
     return "\n".join(lines)
@@ -664,6 +768,10 @@ def apply_runtime_settings(settings: RuntimeSettings) -> None:
     config.FETCH_INTERVAL_SECONDS = settings.fetch_interval_seconds
     config.TWITTER_FETCH_LIMIT = settings.twitter_fetch_limit
     config.MOCK_TWEET_BATCH_SIZE = settings.mock_tweet_batch_size
+    config.INCLUDE_ORIGINAL_POSTS = settings.include_original_posts
+    config.INCLUDE_QUOTE_POSTS = settings.include_quote_posts
+    config.INCLUDE_REPLIES = settings.include_replies
+    config.INCLUDE_REPOSTS = settings.include_reposts
 
     config.RECAP_INTERVAL_SECONDS = settings.recap_interval_seconds
     config.RECAP_STORY_COUNT = settings.recap_story_count
@@ -673,6 +781,12 @@ def apply_runtime_settings(settings: RuntimeSettings) -> None:
     config.FILLER_ENABLED = settings.filler_enabled
     config.FILLER_INTERVAL_SECONDS = settings.filler_interval_seconds
     config.FILLER_TOPICS = settings.filler_topics
+    config.EDITORIAL_SEGMENT_INTERVAL_SECONDS = settings.editorial_segment_interval_seconds
+    config.EDITORIAL_CANDIDATE_LOOKBACK_MINUTES = settings.editorial_candidate_lookback_minutes
+    config.EDITORIAL_REPEAT_COOLDOWN_MINUTES = settings.editorial_repeat_cooldown_minutes
+    config.EDITORIAL_MAX_CONSECUTIVE_SAME_SOURCE = settings.editorial_max_consecutive_same_source
+    config.EDITORIAL_DEFAULT_RUNDOWN_STRATEGY = settings.editorial_default_rundown_strategy
+    config.EDITORIAL_SEGMENT_TYPES = settings.editorial_segment_types
 
     config.LLM_PROVIDER = settings.llm_provider
     config.OLLAMA_MODEL = settings.ollama_model
@@ -703,6 +817,9 @@ def apply_runtime_settings(settings: RuntimeSettings) -> None:
     config.JSON_LOCK_TIMEOUT_SECONDS = settings.json_lock_timeout_seconds
     config.JSON_LOCK_RETRY_SECONDS = settings.json_lock_retry_seconds
     config.LOG_FILE = settings.log_file
+    config.UI_THEME = settings.ui_theme
+    config.UI_ADVANCED_MODE = settings.ui_advanced_mode
+    config.UI_SHOW_CONSOLE = settings.ui_show_console
 
 
 def create_settings_file(path: Path, overwrite: bool = False) -> bool:
