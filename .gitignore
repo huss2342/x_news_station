@@ -44,8 +44,8 @@ x_news_station/cache/*
 !x_news_station/cache/.gitkeep
 
 # User-supplied media and local model assets
-x_news_station/assets/music/*.mp3
-x_news_station/assets/music/*.wav
-!x_news_station/assets/music/.gitkeep
+# x_news_station/assets/music/*.mp3
+# x_news_station/assets/music/*.wav
+# !x_news_station/assets/music/.gitkeep
 x_news_station/kokoro-v1.0.onnx
 x_news_station/voices-v1.0.bin
