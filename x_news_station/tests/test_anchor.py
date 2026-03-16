@@ -52,6 +52,19 @@ class TestSimpleRewriter:
         assert lines[0].speaker == "anchor"
         assert any(line.speaker == "analyst" for line in lines)
 
+    def test_quote_posts_include_quoted_context_in_fallback(self) -> None:
+        tweet = TweetData(
+            id="quote-1",
+            username="AGDugin",
+            text="No, you aren't. And the whole world knows that.",
+            timestamp=datetime.now(),
+            is_quote=True,
+            quoted_username="LeftWingSociety",
+            quoted_text="I finally understand just why the rest of the world hates the USA & Britain.",
+        )
+        result = SimpleRewriter().rewrite(tweet)
+        assert "@LeftWingSociety" in result
+
 
 class TestNewsRewriter:
     def test_uses_fallback_when_ollama_unavailable(self, sample_tweet: TweetData) -> None:
@@ -93,6 +106,35 @@ class TestNewsRewriter:
         mock_ollama.chat.return_value = {"message": {"content": "not json"}}
         lines = NewsRewriter().build_filler_segment("AI rivalry", ["Recent story"])
         assert len(lines) >= 2
+
+    def test_rewrite_prompt_includes_quote_and_article_context(self, mock_ollama: MagicMock) -> None:
+        captured: dict[str, str] = {}
+
+        def fake_call(_system_prompt: str, prompt: str) -> str:
+            captured["prompt"] = prompt
+            return "This just in. @testuser posted a linked update."
+
+        tweet = TweetData(
+            id="quoted-1",
+            username="testuser",
+            text="Main post",
+            timestamp=datetime.now(),
+            quoted_text="Quoted source text",
+            quoted_username="source_account",
+            article_title="Article headline",
+            article_description="Article summary",
+            article_url="https://example.com/story",
+            external_links=["https://example.com/story"],
+        )
+        rewriter = NewsRewriter()
+        rewriter._use_llm = True
+        with patch.object(rewriter, "_call_llm", side_effect=fake_call):
+            result = rewriter.rewrite(tweet)
+
+        assert "Quoted post from @source_account: Quoted source text" in captured["prompt"]
+        assert "Attached article/card: Article headline | Article summary" in captured["prompt"]
+        assert "Attached article URL: https://example.com/story" in captured["prompt"]
+        assert result.startswith("This just in.")
 
 
 def test_get_rewriter_returns_news_rewriter() -> None:

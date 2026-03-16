@@ -28,8 +28,8 @@ def test_desktop_app_renders_navigation_and_console(qtbot, tmp_path: Path) -> No
     window.show()
     qtbot.wait(50)
 
-    assert window.nav_list.count() == 6
-    assert window.page_stack.count() == 6
+    assert window.nav_list.count() == 7
+    assert window.page_stack.count() == 7
     assert window.console_dock.isHidden() is False
     assert window.windowTitle() == "X-News-Station Control Room"
 

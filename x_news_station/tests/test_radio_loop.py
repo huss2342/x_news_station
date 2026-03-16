@@ -213,3 +213,16 @@ def test_rundown_segment_uses_role_specific_voices(tmp_path: Path) -> None:
 
     assert mock_voice.generate.call_args_list[0].args[1] == "am_michael"
     assert mock_voice.generate.call_args_list[1].args[1] == "bf_emma"
+
+
+def test_music_break_starts_music_when_backend_is_ready(tmp_path: Path) -> None:
+    station = _build_station(tmp_path)
+    station.use_music = True
+    station._pygame_initialized = True
+    station._music_ready = True
+    station._play_music = MagicMock()
+    station._fade_volume = MagicMock()
+
+    station._play_rundown_item(RundownItem(segment_type="music_break"))
+
+    station._play_music.assert_called_once()

@@ -1,4 +1,6 @@
-﻿# X-News-Station
+﻿# X-News-Station — Detailed Reference
+
+> **Project overview and quick start:** see the [root README](../README.md).
 
 A fully local "Twitter-to-Radio" application that monitors Twitter/X accounts, turns posts into a live radio-style show with headline reads and filler chatter, converts them to speech, and plays idle music between spoken segments.
 
@@ -96,6 +98,18 @@ To use real Twitter data instead of mock data, the app relies on a project-local
    [station]
    use_mock_twitter = false
    ```
+
+## Twitter/X Terms of Service Notice
+
+> **Important:** This project uses [twscrape](https://github.com/vladkens/twscrape), an unofficial Twitter/X scraping library that operates by reusing browser session cookies (`auth_token`, `ct0`). **This method of accessing Twitter/X is against Twitter/X's Terms of Service.**
+>
+> - You are solely responsible for how you use this software and for compliance with Twitter/X's ToS and applicable law.
+> - This project is intended for local, personal, and educational use only.
+> - The authors make no warranties about the legality of this approach in your jurisdiction.
+> - Twitter/X may suspend or ban accounts used with unofficial scrapers.
+> - Consider using the [official Twitter/X API](https://developer.twitter.com/en/docs) for production or commercial use.
+>
+> The `USE_MOCK_TWITTER = True` default keeps the station running without any Twitter connection. **Enable real Twitter only if you understand and accept these risks.**
 
 ## Adding Music
 
@@ -369,5 +383,7 @@ pytest tests/test_fetcher.py -v
 
 ## License
 
-This project is currently for local experimentation; add a formal license before public distribution.
+This project is licensed under the **MIT License** — see the [LICENSE](../LICENSE) file for details.
+
+Copyright (c) 2026 huss2342
 

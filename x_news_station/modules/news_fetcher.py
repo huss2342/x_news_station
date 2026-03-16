@@ -88,72 +88,69 @@ class BaseTweetMonitor(ABC):
         raise NotImplementedError
 
 
+_MOCK_TWEET_POOL: list[tuple[str, str]] = [
+    ("elonmusk", "Just launched Starship! This is a historic moment for humanity's future in space. #SpaceX #Mars"),
+    ("sama", "AI is going to change everything. We're working hard to make sure it's a positive change for everyone."),
+    ("karpathy", "New blog post on neural network architectures and their training dynamics. https://example.com/blog"),
+    ("elonmusk", "Tesla Full Self-Driving is getting better every day. The future of transportation is autonomous."),
+    ("sama", "Excited to announce our latest research on AI safety. This is critical work for the future."),
+    ("karpathy", "Backpropagation is still the most elegant algorithm in modern machine learning. Thread incoming."),
+    ("elonmusk", "Starlink now covering 70 countries. Global broadband is no longer a luxury — it's a right."),
+    ("sama", "We need to rethink how we evaluate AI systems. Benchmark saturation is a real problem."),
+    ("karpathy", "Spent the weekend reading old SIGGRAPH papers. The ideas from the 90s are still ahead of their time."),
+    ("elonmusk", "The Mars colony will need roughly 1 million people to be self-sustaining. Let's build that future."),
+    ("sama", "Open-source AI models are closing the gap with frontier labs faster than anyone expected."),
+    ("karpathy", "LLMs are increasingly used as reasoning engines. The prompt is the new program."),
+    ("elonmusk", "X is now the fastest-growing social platform in over 30 markets. Free speech is working."),
+    ("sama", "Infrastructure investment in AI compute is accelerating globally. The next 5 years will be decisive."),
+    ("karpathy", "The difference between a good and great engineer is mostly taste. You develop it by reading a lot of code."),
+    ("elonmusk", "Neuralink has enrolled its first 10 patients. Early results are beyond expectations."),
+    ("sama", "Regulation should focus on the most capable frontier models, not open-source ones."),
+    ("karpathy", "Vision transformers continue to outperform CNNs on most tasks. The architecture revolution is still ongoing."),
+    ("elonmusk", "The Boring Company is about to break ground on its largest tunnel project yet. Traffic is solved."),
+    ("sama", "Multimodal models are unlocking completely new application categories. We're very early."),
+    ("karpathy", "Data quality >> data quantity. Garbage in, garbage out. Still the most under-appreciated fact in ML."),
+    ("elonmusk", "Optimus robot now assembling parts on the Tesla factory floor. Humanoid robots are here."),
+    ("sama", "The inference cost of running LLMs dropped 10x in a year. That trajectory changes everything."),
+    ("karpathy", "Spent the morning reading about diffusion models applied to protein folding. Biology is the next frontier."),
+    ("elonmusk", "SpaceX has successfully landed 250 boosters. Reusability is the only path to affordable space access."),
+]
+
+
 class MockTwitterMonitor(BaseTweetMonitor):
-    """Deterministic monitor for tests and local demos."""
+    """Cycling monitor for tests and local demos — produces a continuous stream of unique stories."""
 
     def __init__(self) -> None:
         """Initialize monitor state."""
-        self._first_call = True
-        self._mock_tweets = [
-            TweetData(
-                id="1234567890",
-                username="elonmusk",
-                text=(
-                    "Just launched Starship! This is a historic moment for humanity's "
-                    "future in space. #SpaceX #Mars"
-                ),
-                timestamp=datetime(2024, 3, 1, 12, 0, 0),
-            ),
-            TweetData(
-                id="1234567891",
-                username="sama",
-                text=(
-                    "AI is going to change everything. We're working hard to make sure "
-                    "it's a positive change for everyone."
-                ),
-                timestamp=datetime(2024, 3, 1, 12, 30, 0),
-            ),
-            TweetData(
-                id="1234567892",
-                username="karpathy",
-                text=(
-                    "New blog post on neural network architectures and their training "
-                    "dynamics. Check it out! https://example.com/blog"
-                ),
-                timestamp=datetime(2024, 3, 1, 13, 0, 0),
-            ),
-            TweetData(
-                id="1234567893",
-                username="elonmusk",
-                text=(
-                    "Tesla Full Self-Driving is getting better every day. The future "
-                    "of transportation is autonomous."
-                ),
-                timestamp=datetime(2024, 3, 1, 13, 30, 0),
-            ),
-            TweetData(
-                id="1234567894",
-                username="sama",
-                text=(
-                    "Excited to announce our latest research on AI safety. "
-                    "This is critical work for the future."
-                ),
-                timestamp=datetime(2024, 3, 1, 14, 0, 0),
-            ),
-        ]
-        logger.debug("MockTwitterMonitor initialized")
+        self._call_count = 0
+        logger.debug("MockTwitterMonitor initialized with %s story pool", len(_MOCK_TWEET_POOL))
 
     def fetch_latest(self, accounts: list[str]) -> list[TweetData]:
-        """Return a fixed dataset on first call, then no new tweets."""
-        _ = accounts
-        if not self._first_call:
-            logger.debug("MockTwitterMonitor returning 0 tweets on subsequent call")
-            return []
+        """Return a fresh batch of mock stories on every call, cycling through the pool.
 
-        self._first_call = False
-        mock_batch = self._mock_tweets[: config.MOCK_TWEET_BATCH_SIZE]
-        logger.info("MockTwitterMonitor returning %s tweets", len(mock_batch))
-        return mock_batch
+        Each call generates unique tweet IDs so the seen-ids deduplication treats them
+        as new stories, giving mock mode a continuous stream of broadcast content.
+        """
+        _ = accounts
+        batch_size = config.MOCK_TWEET_BATCH_SIZE
+        pool_size = len(_MOCK_TWEET_POOL)
+        batch_start = (self._call_count * batch_size) % pool_size
+        call_index = self._call_count
+        self._call_count += 1
+
+        now = datetime.now()
+        result: list[TweetData] = []
+        for i in range(batch_size):
+            username, text = _MOCK_TWEET_POOL[(batch_start + i) % pool_size]
+            result.append(TweetData(
+                id=f"mock_{call_index}_{i}",
+                username=username,
+                text=text,
+                timestamp=now,
+            ))
+
+        logger.info("MockTwitterMonitor returning %s mock tweets (call #%s)", len(result), call_index)
+        return result
 
 
 class TwitterMonitor(BaseTweetMonitor):

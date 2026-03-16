@@ -102,6 +102,7 @@ class RadioStation:
 
         if self.use_music and self._init_pygame():
             self._start_fade_worker()
+            self._play_music()
 
         logger.info("RadioStation initialized with state=%s", self.state.name)
 
@@ -561,6 +562,10 @@ class RadioStation:
         """Render and play a single planned segment."""
         if item.segment_type == "music_break":
             logger.info("Planner scheduled music break")
+            if self.use_music:
+                self._play_music()
+                if abs(self._current_volume - config.MUSIC_VOLUME_IDLE) > 0.001:
+                    self._fade_volume(config.MUSIC_VOLUME_IDLE)
             self.planner.mark_aired(item)
             self._save_rundown_state(item)
             return

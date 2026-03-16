@@ -36,7 +36,7 @@ from modules.healthcheck import (
     show_style_value_from_label,
 )
 from modules.news_fetcher import PreviewTweet, get_monitor
-from modules.json_storage import read_json_file
+from modules.json_storage import read_json_file, write_json_file
 from modules.runtime_settings import RuntimeSettings, apply_runtime_settings, load_runtime_settings, save_runtime_settings
 from modules.smoke_test import run_smoke_test
 from modules.twitter_setup import (
@@ -107,6 +107,7 @@ class DesktopSignals(QObject):
     twitter_account_loaded = Signal(object)
     model_list = Signal(str, list)
     voice_preview_finished = Signal()
+    refresh_dashboard = Signal()
 
 
 class StatusCard(QFrame):
@@ -189,6 +190,7 @@ class DesktopApp(QMainWindow):
         self.signals.twitter_account_loaded.connect(self._handle_loaded_twitter_account)
         self.signals.model_list.connect(self._handle_model_list)
         self.signals.voice_preview_finished.connect(self._refresh_voice_status)
+        self.signals.refresh_dashboard.connect(self._refresh_dashboard_preview)
 
     def _build_ui(self) -> None:
         self._build_actions()
@@ -233,6 +235,7 @@ class DesktopApp(QMainWindow):
             "Voices & Audio",
             "AI & Editorial",
             "Diagnostics",
+            "Setup & Credentials",
         ]:
             QListWidgetItem(page_name, self.nav_list)
 
@@ -243,11 +246,12 @@ class DesktopApp(QMainWindow):
         self.page_stack.addWidget(QWidget())
         self.page_stack.addWidget(QWidget())
         self.page_stack.addWidget(QWidget())
+        self.page_stack.addWidget(QWidget())
         self.nav_list.currentRowChanged.connect(self.page_stack.setCurrentIndex)
 
         self.inspector_panel = QFrame()
         self.inspector_panel.setObjectName("inspectorPanel")
-        self.inspector_panel.setFixedWidth(360)
+        self.inspector_panel.setFixedWidth(260)
         self.inspector_layout = QVBoxLayout(self.inspector_panel)
         self.inspector_layout.setContentsMargins(18, 18, 18, 18)
         self.inspector_layout.setSpacing(14)
@@ -280,9 +284,9 @@ class DesktopApp(QMainWindow):
         save_action.triggered.connect(self._save_settings)
         toolbar.addAction(save_action)
 
-        start_action = QAction("Start Station", self)
-        start_action.triggered.connect(self._start_station)
-        toolbar.addAction(start_action)
+        self.start_action = QAction("Start Station", self)
+        self.start_action.triggered.connect(self._start_station)
+        toolbar.addAction(self.start_action)
 
         self.stop_action = QAction("Stop Station", self)
         self.stop_action.triggered.connect(self._stop_station)
@@ -462,6 +466,7 @@ class DesktopApp(QMainWindow):
         self._build_audio_page(self.page_stack.widget(3))
         self._build_ai_page(self.page_stack.widget(4))
         self._build_diagnostics_page(self.page_stack.widget(5))
+        self._build_setup_page(self.page_stack.widget(6))
         self._build_inspector()
 
     def _build_dashboard_page(self, page: QWidget) -> None:
@@ -514,22 +519,6 @@ class DesktopApp(QMainWindow):
         content_row.addWidget(queue_group, 1)
         layout.addLayout(content_row)
 
-        quick_group = QGroupBox("Readiness Actions")
-        quick_layout = QHBoxLayout(quick_group)
-        quick_layout.setContentsMargins(14, 14, 14, 14)
-        quick_layout.setSpacing(10)
-        for label, handler in (
-            ("Refetch Stories", self._refetch_stories),
-            ("Ping Provider", self._ping_provider),
-            ("Run Health Check", self._run_health_check),
-            ("Run Smoke Test", self._run_smoke_test),
-            ("Preview Voices", self._preview_voices),
-        ):
-            button = QPushButton(label)
-            button.clicked.connect(handler)
-            quick_layout.addWidget(button)
-        layout.addWidget(quick_group)
-
         self.dashboard_summary = QLabel("")
         self.dashboard_summary.setObjectName("mutedLabel")
         self.dashboard_summary.setWordWrap(True)
@@ -550,30 +539,67 @@ class DesktopApp(QMainWindow):
 
         self.show_style_combo = self._make_combo(list(SHOW_STYLE_LABELS.keys()))
         self.idle_format_combo = self._make_combo(list(IDLE_FORMAT_LABELS.keys()))
-        self.log_level_combo = self._make_combo(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
         self.accounts_edit = QLineEdit()
         self.accounts_edit.setPlaceholderText("elonmusk, sama, karpathy")
+        self.mock_batch_spin = QSpinBox()
+        self.mock_batch_spin.setRange(1, 500)
+
+        self._add_grid_row(basics, 2, "Show Style", self.show_style_combo)
+        self._add_grid_row(basics, 3, "Idle Format", self.idle_format_combo)
+        self._add_grid_row(basics, 4, "Twitter Accounts", self.accounts_edit)
+        self._add_grid_row(basics, 5, "Mock Tweet Batch Size", self.mock_batch_spin)
+        self._register_advanced_widget(self.mock_batch_spin)
+        layout.addWidget(basics_group)
+
+        timing_group, timing = self._build_group("Broadcast Timing")
         self.fetch_interval_spin = QSpinBox()
         self.fetch_interval_spin.setRange(5, 86400)
         self.recap_interval_spin = QSpinBox()
         self.recap_interval_spin.setRange(30, 86400)
-        self.mock_batch_spin = QSpinBox()
-        self.mock_batch_spin.setRange(1, 500)
         self.filler_enabled_checkbox = QCheckBox("Enable AI Filler Segments")
         self.filler_interval_spin = QSpinBox()
         self.filler_interval_spin.setRange(30, 86400)
 
-        self._add_grid_row(basics, 2, "Show Style", self.show_style_combo)
-        self._add_grid_row(basics, 3, "Idle Format", self.idle_format_combo)
-        self._add_grid_row(basics, 4, "Log Level", self.log_level_combo)
-        self._add_grid_row(basics, 5, "Twitter Accounts", self.accounts_edit)
-        self._add_grid_row(basics, 6, "Fetch Interval (s)", self.fetch_interval_spin)
-        self._add_grid_row(basics, 7, "Recap Interval (s)", self.recap_interval_spin)
-        basics.addWidget(self.filler_enabled_checkbox, 8, 0, 1, 2)
-        self._add_grid_row(basics, 9, "Filler Interval (s)", self.filler_interval_spin)
-        self._add_grid_row(basics, 10, "Mock Tweet Batch Size", self.mock_batch_spin)
-        self._register_advanced_widget(self.mock_batch_spin)
-        layout.addWidget(basics_group)
+        self._add_grid_row(timing, 0, "Fetch Interval (s)", self.fetch_interval_spin)
+        self._add_grid_row(timing, 1, "Recap Interval (s)", self.recap_interval_spin)
+        timing.addWidget(self.filler_enabled_checkbox, 2, 0, 1, 2)
+        self._add_grid_row(timing, 3, "Filler Interval (s)", self.filler_interval_spin)
+        layout.addWidget(timing_group)
+
+        filler_group = QGroupBox("Filler and Discussion Topics")
+        filler_layout = QVBoxLayout(filler_group)
+        filler_layout.setContentsMargins(14, 14, 14, 14)
+        filler_layout.setSpacing(8)
+        self.filler_topic_list = QListWidget()
+        self.filler_topic_list.setSelectionMode(QAbstractItemView.MultiSelection)
+        filler_buttons = QHBoxLayout()
+        select_all_filler = QPushButton("Select All")
+        select_all_filler.clicked.connect(
+            lambda: [self.filler_topic_list.item(index).setSelected(True) for index in range(self.filler_topic_list.count())]
+        )
+        clear_filler = QPushButton("Clear")
+        clear_filler.clicked.connect(self.filler_topic_list.clearSelection)
+        remove_filler = QPushButton("Remove Highlighted")
+        remove_filler.clicked.connect(self._remove_highlighted_filler_topics)
+        filler_buttons.addWidget(select_all_filler)
+        filler_buttons.addWidget(clear_filler)
+        filler_buttons.addWidget(remove_filler)
+        filler_buttons.addStretch(1)
+
+        custom_topic_row = QWidget()
+        custom_topic_layout = QHBoxLayout(custom_topic_row)
+        custom_topic_layout.setContentsMargins(0, 0, 0, 0)
+        custom_topic_layout.setSpacing(8)
+        self.new_filler_topic_edit = QLineEdit()
+        self.new_filler_topic_edit.setPlaceholderText("Add a custom filler topic")
+        add_topic_button = QPushButton("Add Topic")
+        add_topic_button.clicked.connect(self._add_custom_filler_topic)
+        custom_topic_layout.addWidget(self.new_filler_topic_edit, 1)
+        custom_topic_layout.addWidget(add_topic_button)
+        filler_layout.addWidget(self.filler_topic_list)
+        filler_layout.addLayout(filler_buttons)
+        filler_layout.addWidget(custom_topic_row)
+        layout.addWidget(filler_group)
 
         summary_group = QGroupBox("Format Notes")
         summary_layout = QVBoxLayout(summary_group)
@@ -591,71 +617,44 @@ class DesktopApp(QMainWindow):
             "Choose which post types enter the editorial pool and manage project-local Twitter sessions safely.",
         )
         post_group, post_grid = self._build_group("Editorial Source Mix")
+        source_help = QLabel(
+            "These filters directly affect whether fetched posts are eligible to air. If posts are coming back from X but nothing plays, this is one of the first places to check."
+        )
+        source_help.setWordWrap(True)
+        source_help.setObjectName("mutedLabel")
+        post_grid.addWidget(source_help, 0, 0, 1, 2)
         self.include_original_checkbox = QCheckBox("Include Original Posts")
         self.include_quote_checkbox = QCheckBox("Include Quote Posts")
         self.include_replies_checkbox = QCheckBox("Include Replies")
         self.include_reposts_checkbox = QCheckBox("Include Reposts")
-        post_grid.addWidget(self.include_original_checkbox, 0, 0, 1, 2)
-        post_grid.addWidget(self.include_quote_checkbox, 1, 0, 1, 2)
-        post_grid.addWidget(self.include_replies_checkbox, 2, 0, 1, 2)
-        post_grid.addWidget(self.include_reposts_checkbox, 3, 0, 1, 2)
+        post_grid.addWidget(self.include_original_checkbox, 1, 0, 1, 2)
+        post_grid.addWidget(self.include_quote_checkbox, 2, 0, 1, 2)
+        post_grid.addWidget(self.include_replies_checkbox, 3, 0, 1, 2)
+        post_grid.addWidget(self.include_reposts_checkbox, 4, 0, 1, 2)
         self._register_advanced_widget(self.include_replies_checkbox)
         self._register_advanced_widget(self.include_reposts_checkbox)
         layout.addWidget(post_group)
 
-        import_group, import_grid = self._build_group("Twitter Session Import")
-        self.twitter_username_edit = QLineEdit()
-        self.twitter_cookie_string_edit = QLineEdit()
-        self.twitter_cookie_string_edit.setPlaceholderText("Optional: paste a full cookie string if you already have one")
-        self.twitter_auth_token_edit = QLineEdit()
-        self.twitter_auth_token_edit.setEchoMode(QLineEdit.Password)
-        self.twitter_ct0_edit = QLineEdit()
-        self.twitter_ct0_edit.setEchoMode(QLineEdit.Password)
-        self._add_grid_row(import_grid, 0, "Twitter Username", self.twitter_username_edit)
-        self._add_grid_row(import_grid, 1, "Full Cookie String (Optional)", self.twitter_cookie_string_edit)
-        self._add_grid_row(import_grid, 2, "auth_token", self.twitter_auth_token_edit)
-        self._add_grid_row(import_grid, 3, "ct0", self.twitter_ct0_edit)
-        self._register_advanced_widget(self.twitter_cookie_string_edit)
-
-        import_actions = QWidget()
-        import_actions_layout = QHBoxLayout(import_actions)
-        import_actions_layout.setContentsMargins(0, 0, 0, 0)
-        import_actions_layout.setSpacing(8)
+        cache_group = QGroupBox("Seen Story Cache")
+        cache_layout = QVBoxLayout(cache_group)
+        cache_layout.setContentsMargins(14, 14, 14, 14)
+        cache_layout.setSpacing(8)
+        self.seen_cache_label = QLabel("")
+        self.seen_cache_label.setWordWrap(True)
+        self.seen_cache_label.setObjectName("mutedLabel")
+        cache_buttons = QHBoxLayout()
         for label, handler in (
-            ("Import Session Cookie", self._import_twitter_session),
-            ("Clear Secret Fields", self._clear_twitter_secret_fields),
-            ("Show Setup Steps", self._show_twitter_setup),
+            ("Refetch Stories", self._refetch_stories),
+            ("Reset Seen Cache", self._reset_seen_cache),
+            ("Open Seen IDs", self._open_seen_ids_file),
         ):
             button = QPushButton(label)
             button.clicked.connect(handler)
-            import_actions_layout.addWidget(button)
-        import_actions_layout.addStretch(1)
-        import_grid.addWidget(import_actions, 4, 0, 1, 2)
-        layout.addWidget(import_group)
-
-        saved_group = QGroupBox("Saved Accounts")
-        saved_layout = QVBoxLayout(saved_group)
-        saved_layout.setContentsMargins(14, 14, 14, 14)
-        saved_layout.setSpacing(10)
-        self.twitter_account_status = QLabel("No saved Twitter accounts loaded")
-        self.twitter_account_status.setObjectName("mutedLabel")
-        self.twitter_account_status.setWordWrap(True)
-        self.saved_twitter_list = QListWidget()
-        self.saved_twitter_list.setSelectionMode(QAbstractItemView.SingleSelection)
-        saved_buttons = QHBoxLayout()
-        for label, handler in (
-            ("Refresh Saved Accounts", self._refresh_saved_twitter_accounts),
-            ("Load Selected", self._load_selected_twitter_account),
-            ("Delete Selected", self._delete_selected_twitter_account),
-            ("Reset Locks", self._reset_saved_twitter_locks),
-        ):
-            button = QPushButton(label)
-            button.clicked.connect(handler)
-            saved_buttons.addWidget(button)
-        saved_layout.addWidget(self.twitter_account_status)
-        saved_layout.addWidget(self.saved_twitter_list)
-        saved_layout.addLayout(saved_buttons)
-        layout.addWidget(saved_group)
+            cache_buttons.addWidget(button)
+        cache_buttons.addStretch(1)
+        cache_layout.addWidget(self.seen_cache_label)
+        cache_layout.addLayout(cache_buttons)
+        layout.addWidget(cache_group)
 
     def _build_audio_page(self, page: QWidget) -> None:
         layout = self._build_page_shell(
@@ -699,9 +698,6 @@ class DesktopApp(QMainWindow):
         self.music_volume_ducked_slider.valueChanged.connect(self._update_volume_labels)
         self._add_grid_row(music_grid, 1, "Music Volume", idle_row)
         self._add_grid_row(music_grid, 2, "Speech Duck Level", ducked_row)
-        self.log_file_edit = QLineEdit()
-        self._add_grid_row(music_grid, 3, "Log File", self.log_file_edit)
-        self._register_advanced_widget(self.log_file_edit)
         layout.addWidget(music_group)
 
     def _build_ai_page(self, page: QWidget) -> None:
@@ -802,47 +798,19 @@ class DesktopApp(QMainWindow):
         segment_layout.addLayout(segment_buttons)
         layout.addWidget(segment_group)
 
-        filler_group = QGroupBox("Filler and Discussion Topics")
-        filler_layout = QVBoxLayout(filler_group)
-        filler_layout.setContentsMargins(14, 14, 14, 14)
-        filler_layout.setSpacing(8)
-        self.filler_topic_list = QListWidget()
-        self.filler_topic_list.setSelectionMode(QAbstractItemView.MultiSelection)
-        filler_buttons = QHBoxLayout()
-        select_all_filler = QPushButton("Select All")
-        select_all_filler.clicked.connect(
-            lambda: [self.filler_topic_list.item(index).setSelected(True) for index in range(self.filler_topic_list.count())]
-        )
-        clear_filler = QPushButton("Clear")
-        clear_filler.clicked.connect(self.filler_topic_list.clearSelection)
-        remove_filler = QPushButton("Remove Highlighted")
-        remove_filler.clicked.connect(self._remove_highlighted_filler_topics)
-        filler_buttons.addWidget(select_all_filler)
-        filler_buttons.addWidget(clear_filler)
-        filler_buttons.addWidget(remove_filler)
-        filler_buttons.addStretch(1)
-
-        custom_topic_row = QWidget()
-        custom_topic_layout = QHBoxLayout(custom_topic_row)
-        custom_topic_layout.setContentsMargins(0, 0, 0, 0)
-        custom_topic_layout.setSpacing(8)
-        self.new_filler_topic_edit = QLineEdit()
-        self.new_filler_topic_edit.setPlaceholderText("Add a custom filler topic")
-        add_topic_button = QPushButton("Add Topic")
-        add_topic_button.clicked.connect(self._add_custom_filler_topic)
-        custom_topic_layout.addWidget(self.new_filler_topic_edit, 1)
-        custom_topic_layout.addWidget(add_topic_button)
-        filler_layout.addWidget(self.filler_topic_list)
-        filler_layout.addLayout(filler_buttons)
-        filler_layout.addWidget(custom_topic_row)
-        layout.addWidget(filler_group)
-
     def _build_diagnostics_page(self, page: QWidget) -> None:
         layout = self._build_page_shell(
             page,
             "Diagnostics",
             "Keep the terminal visible, inspect the current runtime paths, and open the generated files that drive the dashboard.",
         )
+
+        logging_group, logging_grid = self._build_group("Logging")
+        self.log_level_combo = self._make_combo(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
+        self.log_file_edit = QLineEdit()
+        self._add_grid_row(logging_grid, 0, "Log Level", self.log_level_combo)
+        self._add_grid_row(logging_grid, 1, "Log File", self.log_file_edit)
+        layout.addWidget(logging_group)
 
         paths_group = QGroupBox("Runtime Paths")
         paths_layout = QVBoxLayout(paths_group)
@@ -864,7 +832,6 @@ class DesktopApp(QMainWindow):
 
         diagnostics_actions = QHBoxLayout()
         for label, handler in (
-            ("Show Twitter Setup Steps", self._show_twitter_setup),
             ("Open Log File", self._open_log_file),
             ("Open Accounts DB Folder", self._open_accounts_folder),
             ("Open Rundown State", self._open_rundown_state_file),
@@ -874,6 +841,67 @@ class DesktopApp(QMainWindow):
             diagnostics_actions.addWidget(button)
         diagnostics_actions.addStretch(1)
         layout.addLayout(diagnostics_actions)
+
+    def _build_setup_page(self, page: QWidget) -> None:
+        layout = self._build_page_shell(
+            page,
+            "Setup & Credentials",
+            "One-time Twitter session import and saved account management. Run these steps during initial setup, not during daily operation.",
+        )
+
+        import_group, import_grid = self._build_group("Twitter Session Import")
+        self.twitter_username_edit = QLineEdit()
+        self.twitter_cookie_string_edit = QLineEdit()
+        self.twitter_cookie_string_edit.setPlaceholderText("Optional: paste a full cookie string if you already have one")
+        self.twitter_auth_token_edit = QLineEdit()
+        self.twitter_auth_token_edit.setEchoMode(QLineEdit.Password)
+        self.twitter_ct0_edit = QLineEdit()
+        self.twitter_ct0_edit.setEchoMode(QLineEdit.Password)
+        self._add_grid_row(import_grid, 0, "Twitter Username", self.twitter_username_edit)
+        self._add_grid_row(import_grid, 1, "Full Cookie String (Optional)", self.twitter_cookie_string_edit)
+        self._add_grid_row(import_grid, 2, "auth_token", self.twitter_auth_token_edit)
+        self._add_grid_row(import_grid, 3, "ct0", self.twitter_ct0_edit)
+        self._register_advanced_widget(self.twitter_cookie_string_edit)
+
+        import_actions = QWidget()
+        import_actions_layout = QHBoxLayout(import_actions)
+        import_actions_layout.setContentsMargins(0, 0, 0, 0)
+        import_actions_layout.setSpacing(8)
+        for label, handler in (
+            ("Import Session Cookie", self._import_twitter_session),
+            ("Clear Secret Fields", self._clear_twitter_secret_fields),
+            ("Show Setup Steps", self._show_twitter_setup),
+        ):
+            button = QPushButton(label)
+            button.clicked.connect(handler)
+            import_actions_layout.addWidget(button)
+        import_actions_layout.addStretch(1)
+        import_grid.addWidget(import_actions, 4, 0, 1, 2)
+        layout.addWidget(import_group)
+
+        saved_group = QGroupBox("Saved Accounts")
+        saved_layout = QVBoxLayout(saved_group)
+        saved_layout.setContentsMargins(14, 14, 14, 14)
+        saved_layout.setSpacing(10)
+        self.twitter_account_status = QLabel("No saved Twitter accounts loaded")
+        self.twitter_account_status.setObjectName("mutedLabel")
+        self.twitter_account_status.setWordWrap(True)
+        self.saved_twitter_list = QListWidget()
+        self.saved_twitter_list.setSelectionMode(QAbstractItemView.SingleSelection)
+        saved_buttons = QHBoxLayout()
+        for label, handler in (
+            ("Refresh Saved Accounts", self._refresh_saved_twitter_accounts),
+            ("Load Selected", self._load_selected_twitter_account),
+            ("Delete Selected", self._delete_selected_twitter_account),
+            ("Reset Locks", self._reset_saved_twitter_locks),
+        ):
+            button = QPushButton(label)
+            button.clicked.connect(handler)
+            saved_buttons.addWidget(button)
+        saved_layout.addWidget(self.twitter_account_status)
+        saved_layout.addWidget(self.saved_twitter_list)
+        saved_layout.addLayout(saved_buttons)
+        layout.addWidget(saved_group)
 
     def _build_inspector(self) -> None:
         title = QLabel("Control Panel")
@@ -920,36 +948,6 @@ class DesktopApp(QMainWindow):
         ui_layout.addWidget(self.console_visible_checkbox, 1, 0, 1, 2)
         self.inspector_layout.addWidget(ui_group)
 
-        actions_group = QGroupBox("Quick Actions")
-        actions_layout = QVBoxLayout(actions_group)
-        actions_layout.setContentsMargins(14, 14, 14, 14)
-        actions_layout.setSpacing(8)
-        self.save_button = QPushButton("Save Settings")
-        self.save_button.clicked.connect(self._save_settings)
-        self.start_button = QPushButton("Start Station")
-        self.start_button.clicked.connect(self._start_station)
-        self.stop_button = QPushButton("Stop Station")
-        self.stop_button.clicked.connect(self._stop_station)
-        self.stop_button.setEnabled(False)
-        self.health_button = QPushButton("Run Health Check")
-        self.health_button.clicked.connect(self._run_health_check)
-        self.smoke_button = QPushButton("Run Smoke Test")
-        self.smoke_button.clicked.connect(self._run_smoke_test)
-        self.refetch_button = QPushButton("Refetch Stories")
-        self.refetch_button.clicked.connect(self._refetch_stories)
-        self.ping_button = QPushButton("Ping Provider")
-        self.ping_button.clicked.connect(self._ping_provider)
-        for button in (
-            self.save_button,
-            self.start_button,
-            self.stop_button,
-            self.health_button,
-            self.smoke_button,
-            self.refetch_button,
-            self.ping_button,
-        ):
-            actions_layout.addWidget(button)
-        self.inspector_layout.addWidget(actions_group)
         self.inspector_layout.addStretch(1)
 
     def _selected_theme_value(self) -> str:
@@ -1450,6 +1448,7 @@ class DesktopApp(QMainWindow):
         if settings.include_reposts:
             source_flags.append("repost")
         source_summary = ", ".join(source_flags) if source_flags else "none"
+        seen_count = self._load_seen_count()
         self.dashboard_summary.setText(
             f"{provider_label} backend, {len(settings.twitter_accounts)} tracked account(s), "
             f"{settings.show_style} show style, {settings.editorial_default_rundown_strategy} rundown."
@@ -1461,7 +1460,7 @@ class DesktopApp(QMainWindow):
         self.provider_summary.setText(
             f"{provider_label} | model {settings.llm_api_model if settings.llm_provider == 'openai_compatible' else settings.ollama_model}"
         )
-        self.sources_summary.setText(f"Source mix: {source_summary}")
+        self.sources_summary.setText(f"Source mix: {source_summary} | seen cache: {seen_count} story id(s)")
         self.runtime_summary.setText(
             f"Theme {settings.ui_theme}. Console {'on' if settings.ui_show_console else 'off'}. "
             f"Advanced {'on' if settings.ui_advanced_mode else 'off'}."
@@ -1472,6 +1471,19 @@ class DesktopApp(QMainWindow):
             f"Accounts DB: {get_twitter_db_path()}\n"
             f"Rundown State: {config.get_rundown_state_file()}"
         )
+        if hasattr(self, "seen_cache_label"):
+            self.seen_cache_label.setText(
+                f"The station currently remembers {seen_count} already-aired tweet id(s) in {config.get_seen_ids_file()}. "
+                "If every fetched post shows as already seen, reset this cache to allow rebroadcast."
+            )
+
+    def _load_seen_count(self) -> int:
+        payload = read_json_file(config.get_seen_ids_file(), dict, logging.getLogger(__name__))
+        if isinstance(payload, dict):
+            raw_ids = payload.get("seen_ids", [])
+            if isinstance(raw_ids, list):
+                return len(raw_ids)
+        return 0
 
     def _refresh_rundown_state(self) -> None:
         payload = read_json_file(config.get_rundown_state_file(), dict, logging.getLogger(__name__))
@@ -1686,6 +1698,7 @@ class DesktopApp(QMainWindow):
                 else:
                     for item in preview_items[:8]:
                         self.signals.append_output.emit(render_preview_line(item))
+                self.signals.refresh_dashboard.emit()
                 self.signals.set_status.emit("Story refetch finished")
             except Exception as exc:
                 self.signals.append_output.emit(f"[refetch] Story refetch failed: {exc}")
@@ -1693,6 +1706,26 @@ class DesktopApp(QMainWindow):
 
         threading.Thread(target=worker, name="desktop-refetch-stories", daemon=True).start()
         self.status_badge.setText("Refetching stories")
+
+    def _reset_seen_cache(self) -> None:
+        if QMessageBox.question(
+            self,
+            "Reset Seen Cache",
+            "Clear the seen story cache so previously aired posts can be queued again?",
+        ) != QMessageBox.Yes:
+            return
+
+        success = write_json_file(config.get_seen_ids_file(), {"seen_ids": []}, logging.getLogger(__name__))
+        if not success:
+            QMessageBox.warning(self, "Seen Cache", "Could not reset the seen story cache.")
+            self.status_badge.setText("Seen cache reset failed")
+            return
+        self._append_output(f"[sources] Reset seen story cache at {config.get_seen_ids_file()}")
+        self._refresh_dashboard_preview()
+        self.status_badge.setText("Seen cache reset")
+
+    def _open_seen_ids_file(self) -> None:
+        self._open_path(config.get_seen_ids_file(), "Seen IDs")
 
     def _start_station(self) -> None:
         if self.process is not None and self.process.state() != QProcess.NotRunning:
@@ -1710,8 +1743,7 @@ class DesktopApp(QMainWindow):
         self.process.finished.connect(self._handle_process_finished)
         self.process.start()
 
-        self.start_button.setEnabled(False)
-        self.stop_button.setEnabled(True)
+        self.start_action.setEnabled(False)
         self.stop_action.setEnabled(True)
         self._append_output(f"[launcher] Started station with {sys.executable} -u main.py --no-gui --config {self.settings_path}")
         self.status_badge.setText("Station running")
@@ -1726,8 +1758,7 @@ class DesktopApp(QMainWindow):
     def _handle_process_finished(self, exit_code: int, _exit_status: QProcess.ExitStatus) -> None:
         self._append_output(f"[launcher] Station exited with code {exit_code}")
         self.status_badge.setText(f"Station stopped (code {exit_code})")
-        self.start_button.setEnabled(True)
-        self.stop_button.setEnabled(False)
+        self.start_action.setEnabled(True)
         self.stop_action.setEnabled(False)
         self.process = None
 

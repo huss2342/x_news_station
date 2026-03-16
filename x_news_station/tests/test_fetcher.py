@@ -10,6 +10,7 @@ import pytest
 
 from modules.news_fetcher import (
     BaseTweetMonitor,
+    PreviewTweet,
     MockTwitterMonitor,
     TweetData,
     TwitterMonitor,
@@ -56,24 +57,28 @@ class TestMockTwitterMonitor:
             assert len(tweet.username) > 0
             assert len(tweet.text) > 0
 
-    def test_returns_zero_tweets_on_second_call(self) -> None:
-        """Test that MockTwitterMonitor returns 0 tweets on subsequent calls."""
+    def test_returns_tweets_on_every_call(self) -> None:
+        """Test that MockTwitterMonitor keeps returning tweets on every call (cycling pool)."""
         monitor = MockTwitterMonitor()
 
-        # First call returns 5 tweets
-        tweets_first = monitor.fetch_latest(["elonmusk"])
-        assert len(tweets_first) == 5
+        # Every call should return MOCK_TWEET_BATCH_SIZE tweets
+        for _ in range(5):
+            tweets = monitor.fetch_latest(["elonmusk"])
+            assert len(tweets) == 5
 
-        # Second call returns 0 tweets
-        tweets_second = monitor.fetch_latest(["elonmusk"])
-        assert len(tweets_second) == 0
+    def test_each_call_produces_unique_ids(self) -> None:
+        """Test that successive calls produce distinct tweet IDs so seen-id dedup treats them as new."""
+        monitor = MockTwitterMonitor()
 
-        # Third call also returns 0
-        tweets_third = monitor.fetch_latest(["elonmusk"])
-        assert len(tweets_third) == 0
+        tweets_first = monitor.fetch_latest(["test"])
+        tweets_second = monitor.fetch_latest(["test"])
 
-    def test_deterministic_output(self) -> None:
-        """Test that MockTwitterMonitor returns deterministic fake data."""
+        ids_first = {t.id for t in tweets_first}
+        ids_second = {t.id for t in tweets_second}
+        assert ids_first.isdisjoint(ids_second), "IDs must not overlap between calls"
+
+    def test_consistent_content_across_fresh_instances(self) -> None:
+        """Test that two fresh monitors return the same text content on their first call."""
         monitor1 = MockTwitterMonitor()
         monitor2 = MockTwitterMonitor()
 
@@ -81,12 +86,9 @@ class TestMockTwitterMonitor:
         tweets2 = monitor2.fetch_latest(["test"])
 
         assert len(tweets1) == len(tweets2) == 5
-
         for t1, t2 in zip(tweets1, tweets2):
-            assert t1.id == t2.id
             assert t1.username == t2.username
             assert t1.text == t2.text
-            assert t1.timestamp == t2.timestamp
 
 
 class TestTwitterMonitor:
@@ -229,6 +231,8 @@ class TestTwitterMonitor:
         original.quoteCount = 0
         original.replyCount = 2
         original.url = "https://x.com/test/status/1"
+        original.links = []
+        original.card = None
 
         quote = MagicMock()
         quote.id = "tweet-quote"
@@ -242,6 +246,12 @@ class TestTwitterMonitor:
         quote.quoteCount = 1
         quote.replyCount = 0
         quote.url = "https://x.com/test/status/2"
+        quote.links = [MagicMock(url="https://example.com/article")]
+        quote.card = MagicMock(title="Article title", description="Article description", url="https://example.com/article")
+        quote.quotedTweet = MagicMock()
+        quote.quotedTweet.rawContent = "Quoted source text"
+        quote.quotedTweet.url = "https://x.com/source/status/9"
+        quote.quotedTweet.user = MagicMock(username="source_account")
 
         reply = MagicMock()
         reply.id = "tweet-reply"
@@ -272,6 +282,51 @@ class TestTwitterMonitor:
         assert tweets[0].like_count == 3
         assert tweets[1].is_quote is True
         assert tweets[1].source_type == "quote"
+        assert tweets[1].quoted_text == "Quoted source text"
+        assert tweets[1].quoted_username == "source_account"
+        assert tweets[1].article_title == "Article title"
+        assert tweets[1].article_url == "https://example.com/article"
+        assert tweets[1].link_urls() == ["https://example.com/article"]
+
+    def test_preview_latest_reports_seen_and_new_counts_without_mutating_seen_ids(self, tmp_path: Path) -> None:
+        seen_ids_file = tmp_path / "seen_ids.json"
+        seen_ids_file.write_text(json.dumps({"seen_ids": ["already-seen"]}), encoding="utf-8")
+
+        seen_tweet = MagicMock()
+        seen_tweet.id = "already-seen"
+        seen_tweet.rawContent = "Seen tweet"
+        seen_tweet.date = datetime.now()
+        seen_tweet.inReplyToTweetId = None
+        seen_tweet.retweetedTweet = None
+        seen_tweet.quotedTweet = None
+        seen_tweet.links = []
+        seen_tweet.card = None
+
+        fresh_tweet = MagicMock()
+        fresh_tweet.id = "brand-new"
+        fresh_tweet.rawContent = "Fresh tweet"
+        fresh_tweet.date = datetime.now()
+        fresh_tweet.inReplyToTweetId = None
+        fresh_tweet.retweetedTweet = None
+        fresh_tweet.quotedTweet = None
+        fresh_tweet.links = []
+        fresh_tweet.card = None
+
+        mock_api = MagicMock()
+        mock_api.user_by_login.return_value = MagicMock(id=321)
+        mock_api.user_tweets.return_value = [seen_tweet, fresh_tweet]
+
+        with patch("modules.news_fetcher.create_twscrape_api", return_value=mock_api):
+            monitor = TwitterMonitor(str(seen_ids_file))
+            preview_items, diagnostics = monitor.preview_latest(["testuser"], include_seen=True)
+
+        assert [type(item) for item in preview_items] == [PreviewTweet, PreviewTweet]
+        assert preview_items[0].already_seen is True
+        assert preview_items[1].already_seen is False
+        assert diagnostics[0].raw_count == 2
+        assert diagnostics[0].queued_count == 1
+        assert diagnostics[0].seen_skipped_count == 1
+        assert monitor.seen_ids == {"already-seen"}
 
 
 class TestGetMonitor:

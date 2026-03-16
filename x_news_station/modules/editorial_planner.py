@@ -269,7 +269,8 @@ class EditorialRundownPlanner:
         engagement = candidate.tweet.like_count + (candidate.tweet.retweet_count * 2) + (candidate.tweet.quote_count * 3)
         engagement_score = min(4.0, math.log1p(max(0, engagement)))
         unplayed_bonus = 4.0 if ledger is None or ledger.times_aired == 0 else max(0.0, 2.5 - ledger.times_aired)
-        cooldown_penalty = 4.0 if self._cooldown_active(candidate.tweet.id, now) else 0.0
+        # Cooldown penalty is very large so any story in cooldown ranks below ALL stories not in cooldown.
+        cooldown_penalty = 100.0 if self._cooldown_active(candidate.tweet.id, now) else 0.0
         source_penalty = 0.0
         if self._would_break_source_streak(candidate.tweet.username):
             source_penalty = 1.2
@@ -300,15 +301,23 @@ class EditorialRundownPlanner:
         now: datetime,
         segment_type: str,
     ) -> CandidateRecord | None:
+        # Prefer stories that have never aired or whose cooldown has expired.
         for candidate in ranked:
             record = self._airplay.get(candidate.tweet.id)
-            if record is None:
+            if record is None or not self._cooldown_active(candidate.tweet.id, now):
                 return candidate
-            if not self._cooldown_active(candidate.tweet.id, now):
-                return candidate
-            if record.last_segment_type != segment_type:
-                return candidate
-        return ranked[0] if ranked else None
+
+        # Every candidate is still in cooldown -- pick the one aired the longest ago
+        # so we maximise the gap before replaying any single story.
+        if ranked:
+            def _last_aired(c: CandidateRecord) -> datetime:
+                rec = self._airplay.get(c.tweet.id)
+                if rec is None or rec.last_aired_at is None:
+                    return datetime.min.replace(tzinfo=timezone.utc)
+                return rec.last_aired_at
+
+            return min(ranked, key=_last_aired)
+        return None
 
     def _select_supporting(
         self,

@@ -151,6 +151,8 @@ def _headline_system_prompt() -> str:
         "You are writing copy for a local-first live radio news show. Rewrite raw social posts into a short "
         "broadcast-ready headline. Remove URLs and hashtags. Keep it factual. Mention the account naturally. "
         "Do not start every item the same way. Avoid the phrase 'Breaking news from'. "
+        "If the post is a quote post, you must use the quoted context and identify the quoted account or message. "
+        "If the post links to an article or card, fold that article context into the headline when relevant. "
         f"{_headline_style_prompt()} Return only the final script, in 1-2 sentences."
     )
 
@@ -227,6 +229,7 @@ def _tweet_prompt_context(tweet: TweetData) -> str:
     if tweet.quoted_text:
         quoted_source = f"@{tweet.quoted_username}" if tweet.quoted_username else "quoted account"
         lines.append(f"Quoted post from {quoted_source}: {tweet.quoted_text}")
+        lines.append("Instruction: This is a quote post. Do not ignore the quoted text when writing the headline.")
     if tweet.article_title or tweet.article_description:
         article_summary = " | ".join(bit for bit in [tweet.article_title, tweet.article_description] if bit)
         lines.append(f"Attached article/card: {article_summary}")
@@ -247,22 +250,41 @@ class SimpleRewriter:
     def rewrite(self, tweet: TweetData) -> str:
         """Generate a varied, deterministic headline rewrite."""
         text = normalize_script_text(tweet.text)
-        context_bits: list[str] = []
-        if tweet.quoted_text:
-            quoted_name = f"@{tweet.quoted_username}" if tweet.quoted_username else "another account"
-            context_bits.append(f"The post also quotes {quoted_name} saying {normalize_script_text(tweet.quoted_text)}")
-        elif tweet.article_title:
-            context_bits.append(f"The linked article points to {normalize_script_text(tweet.article_title)}")
-        elif tweet.article_url:
-            context_bits.append("The post links out to an attached article")
-
-        if context_bits:
-            text = f"{text}. {' '.join(context_bits)}".strip()
         if not text:
             text = "shared a brief update with little additional context"
         opener = _deterministic_choice(HEADLINE_OPENERS, f"{tweet.id}:headline:opener")
         connector = _deterministic_choice(HEADLINE_CONNECTORS, f"{tweet.id}:headline:connector")
         username = f"@{tweet.username}"
+
+        if tweet.quoted_text:
+            quoted_name = f"@{tweet.quoted_username}" if tweet.quoted_username else "another account"
+            quoted_text = _trim_sentences(normalize_script_text(tweet.quoted_text), max_sentences=1)
+            templates = [
+                f"{opener} {username} pushed back on a post from {quoted_name}, saying {text}",
+                f"{connector} {username}, a quote-post aimed at {quoted_name} reads: {text}",
+                f"{opener} In response to {quoted_name}, {username} wrote {text}",
+            ]
+            if quoted_text:
+                templates.append(
+                    f"{opener} {username} answered a post from {quoted_name}, which said {quoted_text}"
+                )
+            result = _ensure_sentence_punctuation(
+                _deterministic_choice(templates, f"{tweet.id}:headline:quote-template")
+            )
+            logger.debug("SimpleRewriter output: %s", result[:160])
+            return result
+
+        if tweet.article_title:
+            article_title = normalize_script_text(tweet.article_title)
+            templates = [
+                f"{opener} {connector} {username}, {text} linked to {article_title}",
+                f"{opener} {username} posted {text} alongside an article titled {article_title}",
+            ]
+            result = _ensure_sentence_punctuation(
+                _deterministic_choice(templates, f"{tweet.id}:headline:article-template")
+            )
+            logger.debug("SimpleRewriter output: %s", result[:160])
+            return result
 
         templates = [
             f"{opener} {connector} {username}, {text}",
