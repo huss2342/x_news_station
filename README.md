@@ -134,7 +134,10 @@ The `radio_loop` state machine orchestrates everything: it polls for new tweets,
 
 > The desktop GUI provides a settings dashboard, live broadcast rundown, console log, and voice preview — all in a single window.
 
-*(Screenshots coming soon — contributions welcome)*
+[![Screenshot of X-News-Station GUI1](screenshots/1.png)](screenshots/1.png)
+[![Screenshot of X-News-Station GUI2](screenshots/2.png)](screenshots/2.png)
+
+
 
 ---
 
