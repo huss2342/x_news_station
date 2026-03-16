@@ -239,19 +239,6 @@ CI runs pytest + a health check + a smoke test + a PyInstaller bundle on every p
 
 ---
 
-## Searchability — Recommended GitHub Topics
-
-After publishing, add these topics to the repo (Settings → Topics) so GitHub's search and Explore surface it correctly:
-
-```
-ollama  local-llm  text-to-speech  tts  kokoro  twitter  pyside6  qt  python
-radio  ai  llm  autonomous  news  desktop-application  pygame  twscrape
-```
-
-GitHub Topics are the single most effective way to make an open-source project discoverable — they feed GitHub Explore, topic pages, and external search indexing.
-
----
-
 ## Contributing
 
 Pull requests are welcome! This started as a personal side project and there's plenty of room to grow it. Some ideas:
