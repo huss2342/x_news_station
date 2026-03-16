@@ -138,9 +138,6 @@ The `radio_loop` state machine orchestrates everything: it polls for new tweets,
 [![Screenshot of X-News-Station GUI2](screenshots/2.png)](screenshots/2.png)
 
 
-
----
-
 ## Configuration
 
 Generate a settings file on first run:
