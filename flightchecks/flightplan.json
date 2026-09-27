@@ -1,0 +1,183 @@
+{
+  "repo": "huss2342/x_news_station",
+  "sourceHashes": {
+    "readme_fd06f39f16e3": "ee4ca6d9c86b7b23642d861b5d0ad943e2ef5e48f017e93238ad6b2b1327db94"
+  },
+  "claims": [
+    {
+      "kind": "file_exists",
+      "params": {
+        "path": "LICENSE"
+      },
+      "id": "c_15781d32ac",
+      "sourceId": "readme_fd06f39f16e3",
+      "occurrences": [
+        {
+          "quote": "[LICENSE](LICENSE)",
+          "location": {
+            "sourceId": "readme_fd06f39f16e3",
+            "startOffset": 9641,
+            "endOffset": 9659,
+            "kind": "file",
+            "path": "README.md",
+            "lineStart": 258,
+            "lineEnd": 258
+          }
+        }
+      ],
+      "tier": "static"
+    },
+    {
+      "kind": "file_exists",
+      "params": {
+        "path": "screenshots/1.png"
+      },
+      "id": "c_1caf70d0fd",
+      "sourceId": "readme_fd06f39f16e3",
+      "occurrences": [
+        {
+          "quote": "screenshots/1.png",
+          "location": {
+            "sourceId": "readme_fd06f39f16e3",
+            "startOffset": 5630,
+            "endOffset": 5647,
+            "kind": "file",
+            "path": "README.md",
+            "lineStart": 137,
+            "lineEnd": 138
+          }
+        },
+        {
+          "quote": "screenshots/1.png",
+          "location": {
+            "sourceId": "readme_fd06f39f16e3",
+            "startOffset": 5650,
+            "endOffset": 5667,
+            "kind": "file",
+            "path": "README.md",
+            "lineStart": 137,
+            "lineEnd": 138
+          }
+        }
+      ],
+      "tier": "static"
+    },
+    {
+      "kind": "cli_flag",
+      "params": {
+        "flag": "--no-gui"
+      },
+      "id": "c_330c464309",
+      "sourceId": "readme_fd06f39f16e3",
+      "occurrences": [
+        {
+          "quote": "--no-gui",
+          "location": {
+            "sourceId": "readme_fd06f39f16e3",
+            "startOffset": 2543,
+            "endOffset": 2551,
+            "kind": "file",
+            "path": "README.md",
+            "lineStart": 40,
+            "lineEnd": 52
+          }
+        }
+      ],
+      "tier": "static"
+    },
+    {
+      "kind": "file_exists",
+      "params": {
+        "path": "x_news_station/README.md"
+      },
+      "id": "c_5b3a00d31b",
+      "sourceId": "readme_fd06f39f16e3",
+      "occurrences": [
+        {
+          "quote": "x_news_station/README.md",
+          "location": {
+            "sourceId": "readme_fd06f39f16e3",
+            "startOffset": 6545,
+            "endOffset": 6569,
+            "kind": "file",
+            "path": "README.md",
+            "lineStart": 173,
+            "lineEnd": 173
+          }
+        },
+        {
+          "quote": "x_news_station/README.md",
+          "location": {
+            "sourceId": "readme_fd06f39f16e3",
+            "startOffset": 6572,
+            "endOffset": 6596,
+            "kind": "file",
+            "path": "README.md",
+            "lineStart": 173,
+            "lineEnd": 173
+          }
+        },
+        {
+          "quote": "x_news_station/README.md",
+          "location": {
+            "sourceId": "readme_fd06f39f16e3",
+            "startOffset": 7285,
+            "endOffset": 7309,
+            "kind": "file",
+            "path": "README.md",
+            "lineStart": 188,
+            "lineEnd": 188
+          }
+        },
+        {
+          "quote": "x_news_station/README.md",
+          "location": {
+            "sourceId": "readme_fd06f39f16e3",
+            "startOffset": 7312,
+            "endOffset": 7336,
+            "kind": "file",
+            "path": "README.md",
+            "lineStart": 188,
+            "lineEnd": 188
+          }
+        }
+      ],
+      "tier": "static"
+    },
+    {
+      "kind": "file_exists",
+      "params": {
+        "path": "screenshots/2.png"
+      },
+      "id": "c_6969e14796",
+      "sourceId": "readme_fd06f39f16e3",
+      "occurrences": [
+        {
+          "quote": "screenshots/2.png",
+          "location": {
+            "sourceId": "readme_fd06f39f16e3",
+            "startOffset": 5707,
+            "endOffset": 5724,
+            "kind": "file",
+            "path": "README.md",
+            "lineStart": 137,
+            "lineEnd": 138
+          }
+        },
+        {
+          "quote": "screenshots/2.png",
+          "location": {
+            "sourceId": "readme_fd06f39f16e3",
+            "startOffset": 5727,
+            "endOffset": 5744,
+            "kind": "file",
+            "path": "README.md",
+            "lineStart": 137,
+            "lineEnd": 138
+          }
+        }
+      ],
+      "tier": "static"
+    }
+  ]
+}
