@@ -57,6 +57,17 @@ class TestMockTwitterMonitor:
             assert len(tweet.username) > 0
             assert len(tweet.text) > 0
 
+    def test_timestamps_are_utc_aware_and_survive_planner_prune(self) -> None:
+        """Mock stories must not look hours old outside UTC (naive local time was read as UTC)."""
+        from modules.editorial_planner import EditorialRundownPlanner
+
+        tweets = MockTwitterMonitor().fetch_latest(["test"])
+        assert all(t.timestamp.tzinfo is not None for t in tweets)
+
+        planner = EditorialRundownPlanner(candidate_lookback_minutes=60)
+        planner.ingest_tweets(tweets)
+        assert len(planner._candidates) == len(tweets)
+
     def test_returns_tweets_on_every_call(self) -> None:
         """Test that MockTwitterMonitor keeps returning tweets on every call (cycling pool)."""
         monitor = MockTwitterMonitor()

@@ -8,7 +8,7 @@ import logging
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -138,7 +138,7 @@ class MockTwitterMonitor(BaseTweetMonitor):
         call_index = self._call_count
         self._call_count += 1
 
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         result: list[TweetData] = []
         for i in range(batch_size):
             username, text = _MOCK_TWEET_POOL[(batch_start + i) % pool_size]
@@ -276,9 +276,9 @@ class TwitterMonitor(BaseTweetMonitor):
 
     @classmethod
     def _normalize_tweet(cls, tweet: Any, username: str) -> TweetData:
-        timestamp = getattr(tweet, "date", datetime.now())
+        timestamp = getattr(tweet, "date", datetime.now(timezone.utc))
         if not isinstance(timestamp, datetime):
-            timestamp = datetime.now()
+            timestamp = datetime.now(timezone.utc)
 
         links = cls._normalize_links(getattr(tweet, "links", []))
         quoted_text, quoted_username, quoted_url = cls._extract_quote_context(tweet)

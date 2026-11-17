@@ -3,9 +3,10 @@
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-lightgrey)](#)
-[![CI](https://github.com/YOUR_USERNAME/YOUR_REPO/actions/workflows/desktop-smoke.yml/badge.svg)](https://github.com/YOUR_USERNAME/YOUR_REPO/actions/workflows/desktop-smoke.yml)
 
 **A fully-local, AI-powered radio station that monitors Twitter/X accounts and broadcasts them as a live news show — complete with anchor voice, analyst banter, background music, and automatic recaps. No cloud required.**
+
+![X-News-Station control room running a mock broadcast](screenshots/demo.gif)
 
 > **Origin:** I got tired of endlessly scrolling my Twitter/X feed just to catch up on what people I follow were saying. So I built a radio station that does it for me — I can have it playing in the background while I work and just listen. This was developed as a quick side project using AI assistance (Claude) for the bulk of the code.
 
@@ -72,7 +73,7 @@ All processing happens locally — no API keys needed for the core experience.
 
 ```bash
 # 1. Clone
-git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git
+git clone https://github.com/huss2342/x_news_station.git
 cd YOUR_REPO/x_news_station
 
 # 2. Install
@@ -134,8 +135,9 @@ The `radio_loop` state machine orchestrates everything: it polls for new tweets,
 
 > The desktop GUI provides a settings dashboard, live broadcast rundown, console log, and voice preview — all in a single window.
 
-[![Screenshot of X-News-Station GUI1](screenshots/1.png)](screenshots/1.png)
-[![Screenshot of X-News-Station GUI2](screenshots/2.png)](screenshots/2.png)
+[![X-News-Station dashboard during a broadcast](screenshots/1.png)](screenshots/1.png)
+
+<sub>Screenshots use mock mode with made-up demo accounts.</sub>
 
 
 ## Configuration
